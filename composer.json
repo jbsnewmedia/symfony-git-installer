@@ -1,0 +1,31 @@
+{
+    "name": "jbsnewmedia/symfony-git-installer",
+    "description": "A lightweight PHP tool for downloading and extracting branches or tags from GitHub repositories.",
+    "type": "project",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Jürgen Schwind",
+            "email": "juergen.schwind@jbs-newmedia.de"
+        }
+    ],
+    "require": {
+        "php": ">=8.2",
+        "ext-curl": "*",
+        "ext-zip": "*",
+        "ext-openssl": "*"
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true,
+        "allow-plugins": {
+            "symfony/flex": true,
+            "symfony/runtime": true
+        }
+    },
+    "autoload": {
+        "files": [
+            "src/index.php"
+        ]
+    }
+}
