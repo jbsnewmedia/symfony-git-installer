@@ -7,6 +7,8 @@ return [
 
     'github_token' => $_ENV['GITHUB_TOKEN'] ?? '',
 
+    'password' => '',
+
     'api_base_url' => 'https://api.github.com',
 
     'target_directory' => '../../',
