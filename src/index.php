@@ -339,6 +339,19 @@ class GitHubClient
         }
         $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
+
+        if (403 === $httpCode && '' !== $this->token) {
+            $headers = ['User-Agent: '.$this->userAgent, 'Accept: application/vnd.github.v3+json'];
+            $ch = curl_init();
+            $options[CURLOPT_HTTPHEADER] = $headers;
+            curl_setopt_array($ch, $options);
+            $response = curl_exec($ch);
+            if (false !== $response) {
+                $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            }
+            curl_close($ch);
+        }
+
         if ($httpCode >= 400) {
             throw new RuntimeException("GitHub API Error: HTTP {$httpCode}");
         }
@@ -459,6 +472,20 @@ class GitHubClient
         }
         $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
+
+        // If request with token failed with 403, retry without token (for public repos)
+        if (403 === $httpCode && '' !== $this->token) {
+            $headers = ['User-Agent: '.$this->userAgent];
+            $ch = curl_init();
+            $options[CURLOPT_HTTPHEADER] = $headers;
+            curl_setopt_array($ch, $options);
+            $response = curl_exec($ch);
+            if (false !== $response) {
+                $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            }
+            curl_close($ch);
+        }
+
         if (200 !== $httpCode) {
             throw new RuntimeException("Download failed: HTTP {$httpCode}");
         }
