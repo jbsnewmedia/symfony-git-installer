@@ -1,6 +1,8 @@
 /.idea/
+/.php-cs-fixer.cache
+/.phpunit.cache/
+/composer.lock
+/var/
+/vendor/
 /vendor-bin/*/composer.lock
 /vendor-bin/*/vendor/
-/.php-cs-fixer.cache
-/composer.lock
-/vendor/

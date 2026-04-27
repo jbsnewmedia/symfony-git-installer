@@ -40,62 +40,37 @@
         }
     },
     "scripts": {
-        "bin-ecs-install": [
-            "composer bin ecs install"
-        ],
-        "bin-ecs-update": [
-            "composer bin ecs update"
-        ],
-        "bin-ecs": [
-            "vendor-bin/ecs/vendor/bin/php-cs-fixer check --allow-risky=yes"
-        ],
-        "bin-ecs-fix": [
-            "vendor-bin/ecs/vendor/bin/php-cs-fixer fix --allow-risky=yes"
-        ],
-        "bin-ecs-v": [
-            "vendor-bin/ecs/vendor/bin/php-cs-fixer -V"
-        ],
-        "bin-ecs-plugin": [
-            "./tools/bin/bin-ecs-plugin.sh"
-        ],
-        "bin-ecs-fix-plugin": [
-            "./tools/bin/bin-ecs-fix-plugin.sh"
-        ],
-        "bin-phpstan-install": [
-            "composer bin phpstan install"
-        ],
-        "bin-phpstan-update": [
-            "composer bin phpstan update"
-        ],
-        "bin-phpstan": [
-            "vendor-bin/phpstan/vendor/bin/phpstan analyse --configuration=phpstan-global.neon"
-        ],
-        "bin-phpstan-v": [
-            "vendor-bin/phpstan/vendor/bin/phpstan -V"
-        ],
-        "bin-phpstan-plugin": [
-            "./tools/bin/bin-phpstan-plugin.sh"
-        ],
-        "bin-rector-install": [
-            "composer bin rector install"
-        ],
-        "bin-rector-update": [
-            "composer bin rector update"
-        ],
-        "bin-rector": [
-            "vendor-bin/rector/vendor/bin/rector --dry-run"
-        ],
-        "bin-rector-process": [
-            "vendor-bin/rector/vendor/bin/rector process"
-        ],
-        "bin-rector-v": [
-            "vendor-bin/rector/vendor/bin/rector -V"
-        ],
-        "bin-rector-plugin": [
-            "./tools/bin/bin-rector-plugin.sh"
-        ],
-        "bin-rector-process-plugin": [
-            "./tools/bin/bin-rector-process-plugin.sh"
-        ]
+        "bin-ecs-install": ["composer bin ecs install"],
+        "bin-ecs-update": ["composer bin ecs update"],
+        "bin-ecs": ["vendor-bin/ecs/vendor/bin/php-cs-fixer check --allow-risky=yes"],
+        "bin-ecs-fix": ["vendor-bin/ecs/vendor/bin/php-cs-fixer fix --allow-risky=yes"],
+        "bin-ecs-v": ["vendor-bin/ecs/vendor/bin/php-cs-fixer -V"],
+
+        "bin-phpstan-install": ["composer bin phpstan install"],
+        "bin-phpstan-update": ["composer bin phpstan update"],
+        "bin-phpstan": ["vendor-bin/phpstan/vendor/bin/phpstan analyse --configuration=phpstan-global.neon"],
+        "bin-phpstan-v": ["vendor-bin/phpstan/vendor/bin/phpstan -V"],
+
+        "bin-phpunit-install": ["composer bin phpunit install"],
+        "bin-phpunit-update": ["composer bin phpunit update"],
+        "bin-phpunit": ["vendor-bin/phpunit/vendor/bin/phpunit"],
+        "bin-phpunit-no-coverage": ["vendor-bin/phpunit/vendor/bin/phpunit --configuration=phpunit-no-coverage.xml.dist"],
+        "bin-phpunit-coverage": ["XDEBUG_MODE=coverage vendor-bin/phpunit/vendor/bin/phpunit --configuration=phpunit-coverage.xml.dist --coverage-html var/coverage"],
+        "bin-phpunit-v": ["vendor-bin/phpunit/vendor/bin/phpunit --version"],
+
+        "bin-rector-install": ["composer bin rector install"],
+        "bin-rector-update": ["composer bin rector update"],
+        "bin-rector": ["vendor-bin/rector/vendor/bin/rector --dry-run"],
+        "bin-rector-process": ["vendor-bin/rector/vendor/bin/rector process"],
+        "bin-rector-v": ["vendor-bin/rector/vendor/bin/rector -V"],
+
+        "test": ["@bin-phpunit-no-coverage"],
+        "test-coverage": ["@bin-phpunit-coverage"],
+        "test-full": ["@bin-phpunit"],
+        "test-watch": ["@bin-phpunit --testdox"],
+
+        "ci": ["@bin-ecs", "@bin-rector", "@bin-phpstan", "@bin-phpunit-no-coverage"],
+        "ci-fix": ["@bin-ecs-fix", "@bin-rector-process", "@bin-phpstan", "@bin-phpunit-no-coverage"],
+        "ci-coverage": ["@bin-ecs", "@bin-rector", "@bin-phpstan", "@bin-phpunit-coverage"]
     }
 }
