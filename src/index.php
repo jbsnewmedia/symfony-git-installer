@@ -191,7 +191,7 @@ function canUpdateInstallerToTag(string $currentInstallerVersion, string $target
         return true;
     }
 
-    return version_compare($currentSemver, '1.2.0', '>=');
+    return version_compare($currentSemver, '1.0.0', '>=');
 }
 
 function normalizeRelativePath(string $path): string
