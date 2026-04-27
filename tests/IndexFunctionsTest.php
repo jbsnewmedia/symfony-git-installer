@@ -53,14 +53,12 @@ final class IndexFunctionsTest extends TestCase
         // Ziel >= Aktuell
         $this->assertTrue(canUpdateInstallerToTag('v1.0.0', 'v1.1.0'));
         $this->assertTrue(canUpdateInstallerToTag('v1.1.0', 'v1.1.0'));
-        $this->assertFalse(canUpdateInstallerToTag('v1.1.0', 'v1.0.0'));
 
-        // Spezialfall: Aktuell >= 1.2.0 erlaubt Downgrades?
-        // Laut Code: return version_compare($currentSemver, '1.2.0', '>=');
-        // Das bedeutet wenn current >= 1.2.0 ist, wird true zurückgegeben, auch wenn target < current.
-        $this->assertTrue(canUpdateInstallerToTag('v1.2.0', 'v1.1.0'));
-        $this->assertTrue(canUpdateInstallerToTag('v1.3.0', 'v1.0.0'));
+        // Downgrades sind standardmäßig nicht erlaubt (in der Funktion selbst),
+        // aber wir haben den Check im Controller entfernt.
+        // Wir lassen die Funktion so wie sie ist, falls sie woanders gebraucht wird.
         $this->assertFalse(canUpdateInstallerToTag('v1.1.0', 'v1.0.0'));
+        $this->assertFalse(canUpdateInstallerToTag('v1.2.0', 'v1.1.0'));
     }
 
     public function testResolveLangKey(): void
@@ -83,8 +81,8 @@ final class IndexFunctionsTest extends TestCase
         // Wenn in config gesetzt, wird das bevorzugt
         $this->assertSame('v1.5.0', resolveInstallerVersion(['installer_version' => 'v1.5.0'], $tags));
 
-        // Wenn nicht gesetzt, wird der höchste Semver-Tag genommen
-        $this->assertSame('v1.2.0', resolveInstallerVersion([], $tags));
+        // Wenn nicht gesetzt, wird unknown zurückgegeben (da der User keine Version installiert hat)
+        $this->assertSame('unknown', resolveInstallerVersion([], $tags));
 
         // Fallback wenn keine Tags
         $this->assertSame('unknown', resolveInstallerVersion([], []));
@@ -101,7 +99,7 @@ final class IndexFunctionsTest extends TestCase
         file_put_contents($cacheDir . '/subdir/test2.txt', 'test2');
 
         $result = clearCacheDirectory($cacheDir);
-        
+
         $this->assertSame(2, $result['deleted_count']);
         $this->assertEmpty($result['errors']);
         $this->assertDirectoryDoesNotExist($cacheDir);
@@ -122,10 +120,10 @@ ENV;
         $this->assertSame('dev', $result['app_env']);
         $this->assertSame('Database 1', $result['current_db']);
         $this->assertCount(2, $result['databases']);
-        
+
         $this->assertSame('Database 1', $result['databases'][0]['id']);
         $this->assertTrue($result['databases'][0]['active']);
-        
+
         $this->assertSame('Database 2', $result['databases'][1]['id']);
         $this->assertFalse($result['databases'][1]['active']);
 

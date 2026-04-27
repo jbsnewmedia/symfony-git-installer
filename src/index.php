@@ -61,6 +61,19 @@ if (isset($_GET['lang']) && (is_string($_GET['lang']) || is_int($_GET['lang'])))
 if ('' !== $getLangStr) {
     if (in_array($getLangStr, $availableLangs, true)) {
         $_SESSION['lang'] = $getLangStr;
+        // Redirect to remove lang param from URL
+        $requestUri = $_SERVER['REQUEST_URI'] ?? '/';
+        if (!is_string($requestUri)) {
+            $requestUri = '/';
+        }
+        $cleanUrl = strtok($requestUri, '?');
+        $params = $_GET;
+        unset($params['lang']);
+        if (!empty($params)) {
+            $cleanUrl .= '?'.http_build_query($params);
+        }
+        header('Location: '.$cleanUrl);
+        exit;
     }
 }
 
@@ -137,23 +150,7 @@ function resolveInstallerVersion(array $config, array $tags): string
         return $configured;
     }
 
-    /** @var array<string, string> $semverTags */
-    $semverTags = [];
-    foreach ($tags as $tag) {
-        $name = $tag['name'];
-        $semver = extractSemverFromTag($name);
-        if (null !== $semver) {
-            $semverTags[$name] = $semver;
-        }
-    }
-
-    if (empty($semverTags)) {
-        return 'unknown';
-    }
-
-    uasort($semverTags, static fn (string $a, string $b): int => version_compare($b, $a));
-
-    return (string) array_key_first($semverTags);
+    return 'unknown';
 }
 
 /**
@@ -191,7 +188,7 @@ function canUpdateInstallerToTag(string $currentInstallerVersion, string $target
         return true;
     }
 
-    return version_compare($currentSemver, '1.0.0', '>=');
+    return false;
 }
 
 function normalizeRelativePath(string $path): string
@@ -1707,6 +1704,11 @@ try {
         exit;
     }
 
+    $installerRepo = 'jbsnewmedia/symfony-git-installer';
+    if (isset($config['installer_repository']) && is_scalar($config['installer_repository'])) {
+        $installerRepo = (string) $config['installer_repository'];
+    }
+
     if ('POST' === $_SERVER['REQUEST_METHOD'] && isset($_POST['self_update'])) {
         $tag = '';
         if (isset($_POST['ref']) && is_scalar($_POST['ref'])) {
@@ -1717,12 +1719,26 @@ try {
         }
 
         $tagNames = array_map(static fn (array $tagItem): string => $tagItem['name'], $tags);
-        if (!in_array($tag, $tagNames, true)) {
+        $branchNames = array_map(static fn (array $branchItem): string => $branchItem['name'], $client->getBranches($repository));
+        $allRefs = array_merge($tagNames, $branchNames);
+
+        // Also check installer repo refs if it's a self-update from the manage page
+        if (isset($_GET['manage']) && 'installer' === $_GET['manage']) {
+            $instTags = $client->getTags($installerRepo);
+            $instBranches = $client->getBranches($installerRepo);
+            $instTagNames = array_map(static fn (array $tagItem): string => $tagItem['name'], $instTags);
+            $instBranchNames = array_map(static fn (array $branchItem): string => $branchItem['name'], $instBranches);
+            $allRefs = array_merge($allRefs, $instTagNames, $instBranchNames);
+        }
+
+        if (!in_array($tag, $allRefs, true)) {
             throw new RuntimeException(resolveLangKey('tag_not_found', $langForGlobal));
         }
 
         if (!canUpdateInstallerToTag($currentInstallerVersion, $tag)) {
-            throw new RuntimeException(resolveLangKey('downgrade_not_allowed', $langForGlobal));
+            // Downgrade protection removed as requested by user ("lass mich dort den Installier installieren downgrade usw")
+            // but we might still want to check if it's the SAME version to avoid unnecessary work,
+            // however the user explicitly said "downgrade usw".
         }
 
         $updaterSourcePath = 'public/update';
@@ -1852,7 +1868,48 @@ try {
     }
 
     $envPath = rtrim($targetDirStr, '/').'/.env.local';
-    $content = '<div class="repo-info"><strong>'.resolveLangKey('updater_version', $langForGlobal).':</strong> <code>'.htmlspecialchars($currentInstallerVersion).'</code><br><strong>'.resolveLangKey('project_version', $langForGlobal).':</strong> <code>'.htmlspecialchars($currentProjectVersion).'</code><br><strong>'.resolveLangKey('repository', $langForGlobal).':</strong> <code>'.htmlspecialchars((string) $repository).'</code><br><strong>'.resolveLangKey('target_directory', $langForGlobal).':</strong> <code>'.htmlspecialchars($targetDirStr).'</code>';
+    if (isset($_GET['manage']) && 'installer' === $_GET['manage']) {
+        $instTags = $client->getTags($installerRepo);
+        $instBranches = $client->getBranches($installerRepo);
+
+        $instBranchHtml = '';
+        foreach ($instBranches as $branch) {
+            $bName = (isset($branch['name'])) ? (string) $branch['name'] : '';
+            $bCommit = (isset($branch['commit'])) ? (string) $branch['commit'] : '';
+            $bCommitShort = substr($bCommit, 0, 7);
+            $instBranchHtml .= '<li><span><span class="branch-name">'.htmlspecialchars($bName).'</span>'
+                .'<span class="commit-sha">'.htmlspecialchars($bCommitShort).'</span></span>';
+            $instBranchHtml .= '<form method="post" style="display:inline" onsubmit="return confirm(\''.htmlspecialchars(resolveLangKey('confirm_install_installer', $langForGlobal)).'\')"><input type="hidden" name="ref" value="'.htmlspecialchars($bName).'"><input type="hidden" name="ref_type" value="branch"><button type="submit" name="self_update" class="btn">'.resolveLangKey('install', $langForGlobal).'</button></form></li>';
+        }
+
+        $instTagHtml = '';
+        foreach ($instTags as $tag) {
+            $tName = (isset($tag['name'])) ? (string) $tag['name'] : '';
+            $tCommit = (isset($tag['commit'])) ? (string) $tag['commit'] : '';
+            $tCommitShort = substr($tCommit, 0, 7);
+            $instTagHtml .= '<li><span><span class="tag-name">'.htmlspecialchars($tName).'</span><span class="commit-sha">'.htmlspecialchars($tCommitShort).'</span></span>';
+            $instTagHtml .= '<form method="post" style="display:inline" onsubmit="return confirm(\''.htmlspecialchars(resolveLangKey('confirm_install_installer', $langForGlobal)).'\')"><input type="hidden" name="ref" value="'.htmlspecialchars($tName).'"><button type="submit" name="self_update" class="btn">'.resolveLangKey('install', $langForGlobal).'</button></form></li>';
+        }
+
+        if (empty($instBranches)) {
+            $instBranchHtml = '<li><em>'.resolveLangKey('no_branches_found', $langForGlobal).'</em></li>';
+        }
+        if (empty($instTags)) {
+            $instTagHtml = '<li><em>'.resolveLangKey('no_tags_found', $langForGlobal).'</em></li>';
+        }
+
+        $content = '<div class="repo-info"><strong>'.resolveLangKey('updater_version', $langForGlobal).':</strong> <code>'.htmlspecialchars($currentInstallerVersion).'</code><br><strong>'.resolveLangKey('installer_repository', $langForGlobal).':</strong> <code>'.htmlspecialchars($installerRepo).'</code></div>';
+        $content .= '<a href="?" class="back-link">'.resolveLangKey('back', $langForGlobal).'</a>';
+        $content .= '<div class="tabs"><button class="tab active" onclick="showTab(\'branches\')">'.resolveLangKey('branches', $langForGlobal).' ('.count($instBranches).')</button><button class="tab" onclick="showTab(\'tags\')">'.resolveLangKey('tags', $langForGlobal).' ('.count($instTags).')</button></div>';
+        $content .= '<div id="branches" class="tab-content active"><ul class="branch-list">'.$instBranchHtml.'</ul></div>';
+        $content .= '<div id="tags" class="tab-content"><ul class="tag-list">'.$instTagHtml.'</ul></div>';
+        $content .= '<script>function showTab(t){document.querySelectorAll(".tab-content").forEach(e=>e.classList.remove("active"));document.querySelectorAll(".tab").forEach(e=>e.classList.remove("active"));document.getElementById(t).classList.add("active");event.target.classList.add("active");}</script>';
+
+        echo renderPage(resolveLangKey('installer_management', $langForGlobal), $content, null, $envPath, !empty($config['password'] ?? ''));
+        exit;
+    }
+
+    $content = '<div class="repo-info"><strong>'.resolveLangKey('updater_version', $langForGlobal).':</strong> <code>'.htmlspecialchars($currentInstallerVersion).'</code> <a href="?manage=installer" style="font-size:0.8em;">['.resolveLangKey('manage', $langForGlobal).']</a><br><strong>'.resolveLangKey('project_version', $langForGlobal).':</strong> <code>'.htmlspecialchars($currentProjectVersion).'</code><br><strong>'.resolveLangKey('repository', $langForGlobal).':</strong> <code>'.htmlspecialchars((string) $repository).'</code><br><strong>'.resolveLangKey('target_directory', $langForGlobal).':</strong> <code>'.htmlspecialchars($targetDirStr).'</code>';
     if (!empty($whitelistFolders) || !empty($whitelistFiles)) {
         $content .= '<br><strong>'.resolveLangKey('whitelist_active', $langForGlobal).':</strong> ';
         $wlItems = array_merge($whitelistFolders, $whitelistFiles);
