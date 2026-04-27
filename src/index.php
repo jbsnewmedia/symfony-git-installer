@@ -8,35 +8,108 @@ declare(strict_types=1);
  * Downloads and extracts branches or tags from GitHub repositories.
  * Style inspired by Composer.
  */
-session_start();
+if (PHP_SAPI !== 'cli') {
+    session_start();
+} else {
+    if (!isset($_SESSION)) {
+        $_SESSION = [];
+    }
+    if (!isset($_SESSION['lang'])) {
+        $_SESSION['lang'] = 'en';
+    }
+    if (!isset($_SERVER['REQUEST_METHOD'])) {
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+    }
+
+    return;
+}
 
 $configPath = __DIR__.'/config.php';
-$config = file_exists($configPath) ? require $configPath : require __DIR__.'/config.example.php';
-
-$langDir = __DIR__.'/lang/';
-$availableLangs = array_map(fn ($f) => basename($f, '.php'), glob($langDir.'*.php'));
-$defaultLang = $config['default_language'] ?? 'en';
-
-if (!isset($_SESSION['lang'])) {
-    $_SESSION['lang'] = $defaultLang;
+$loadedConfig = file_exists($configPath) ? require $configPath : require __DIR__.'/config.example.php';
+if (!is_array($loadedConfig)) {
+    $loadedConfig = [];
 }
-if (isset($_GET['lang'])) {
-    if (in_array($_GET['lang'], $availableLangs, true)) {
-        $_SESSION['lang'] = $_GET['lang'];
+/** @var array<string, mixed> $config */
+$config = [];
+foreach ($loadedConfig as $k => $v) {
+    if (is_string($k)) {
+        $config[$k] = $v;
+    } elseif (is_int($k)) {
+        $config[(string) $k] = $v;
     }
 }
 
-$lang = require $langDir.$_SESSION['lang'].'.php';
+$langDir = __DIR__.'/lang/';
+$foundLangs = glob($langDir.'*.php');
+/** @var array<string> $availableLangs */
+$availableLangs = (false !== $foundLangs) ? array_map(fn ($f) => basename((string) $f, '.php'), $foundLangs) : [];
+$defaultLang = '';
+if (isset($config['default_language']) && is_scalar($config['default_language'])) {
+    $defaultLang = (string) $config['default_language'];
+}
+if ('' === $defaultLang) {
+    $defaultLang = 'en';
+}
 
+if (!isset($_SESSION['lang']) || !is_string($_SESSION['lang'])) {
+    $_SESSION['lang'] = $defaultLang;
+}
+$getLangStr = '';
+if (isset($_GET['lang']) && (is_string($_GET['lang']) || is_int($_GET['lang']))) {
+    $getLangStr = (string) $_GET['lang'];
+}
+if ('' !== $getLangStr) {
+    if (in_array($getLangStr, $availableLangs, true)) {
+        $_SESSION['lang'] = $getLangStr;
+    }
+}
+
+$sessionLang = 'en';
+if (isset($_SESSION['lang']) && is_string($_SESSION['lang'])) {
+    $sessionLang = $_SESSION['lang'];
+}
+$langFile = $langDir.$sessionLang.'.php';
+$loadedLang = file_exists($langFile) ? require $langFile : [];
+if (!is_array($loadedLang)) {
+    $loadedLang = [];
+}
+/** @var array<string, string> $lang */
+$lang = [];
+foreach ($loadedLang as $k => $v) {
+    $kStr = (string) $k;
+    if (is_scalar($v)) {
+        $vStr = (string) $v;
+        $lang[$kStr] = $vStr;
+    }
+}
+
+/**
+ * @param array<string, string>           $lang
+ * @param array<string, string|int|float> $placeholders
+ */
+function resolveLangKey(string $key, array $lang, array $placeholders = []): string
+{
+    $text = (isset($lang[$key])) ? (string) $lang[$key] : $key;
+    foreach ($placeholders as $k => $v) {
+        $vStr = (string) $v;
+        $text = str_replace(':'.$k, $vStr, (string) $text);
+    }
+
+    return (string) $text;
+}
+
+/**
+ * @param array<string, string|int|float> $placeholders
+ */
 function __(string $key, array $placeholders = []): string
 {
     global $lang;
-    $text = $lang[$key] ?? $key;
-    foreach ($placeholders as $k => $v) {
-        $text = str_replace(':'.$k, (string) $v, $text);
+    /** @var array<string, string> $lang */
+    if (!isset($lang) || !is_array($lang)) {
+        return $key;
     }
 
-    return $text;
+    return resolveLangKey($key, $lang, $placeholders);
 }
 
 function extractSemverFromTag(string $tag): ?string
@@ -49,16 +122,25 @@ function extractSemverFromTag(string $tag): ?string
     return null;
 }
 
+/**
+ * @param array<string, mixed>                            $config
+ * @param array<int, array{name: string, commit: string}> $tags
+ */
 function resolveInstallerVersion(array $config, array $tags): string
 {
-    $configured = trim((string) ($config['installer_version'] ?? ''));
+    /** @var string $configured */
+    $configured = '';
+    if (isset($config['installer_version']) && is_scalar($config['installer_version'])) {
+        $configured = trim((string) $config['installer_version']);
+    }
     if ('' !== $configured) {
         return $configured;
     }
 
+    /** @var array<string, string> $semverTags */
     $semverTags = [];
     foreach ($tags as $tag) {
-        $name = (string) ($tag['name'] ?? '');
+        $name = $tag['name'];
         $semver = extractSemverFromTag($name);
         if (null !== $semver) {
             $semverTags[$name] = $semver;
@@ -74,6 +156,9 @@ function resolveInstallerVersion(array $config, array $tags): string
     return (string) array_key_first($semverTags);
 }
 
+/**
+ * @param array<string, mixed> $updates
+ */
 function writeConfigValues(string $configPath, array $updates): bool
 {
     if (!file_exists($configPath)) {
@@ -82,9 +167,11 @@ function writeConfigValues(string $configPath, array $updates): bool
 
     $current = require $configPath;
     if (!is_array($current)) {
-        return false;
+        /** @var array<string, mixed> $current */
+        $current = [];
     }
 
+    /** @var array<string, mixed> $merged */
     $merged = array_replace($current, $updates);
     $content = "<?php\n\ndeclare(strict_types=1);\n\nreturn ".var_export($merged, true).";\n";
 
@@ -123,6 +210,9 @@ function isAllowedUpdaterFile(string $relativePath): bool
     return 1 === preg_match('/^lang\/.+\.php$/i', $relativePath);
 }
 
+/**
+ * @return array{updated_files: array<string>, skipped_files: array<string>}
+ */
 function updateUpdaterFromTag(
     GitHubClient $client,
     string $repository,
@@ -131,7 +221,7 @@ function updateUpdaterFromTag(
     string $destinationDir,
 ): array {
     $zipContent = $client->downloadArchive($repository, $tag, 'tag');
-    $tempFile = tempnam(sys_get_temp_dir(), 'updater_self_');
+    $tempFile = (string) tempnam(sys_get_temp_dir(), 'updater_self_');
     file_put_contents($tempFile, $zipContent);
 
     $updatedFiles = [];
@@ -149,11 +239,11 @@ function updateUpdaterFromTag(
         $zip->close();
 
         $dirs = glob($tempExtractDir.'/*', GLOB_ONLYDIR);
-        if (empty($dirs)) {
+        if (false === $dirs || empty($dirs)) {
             throw new RuntimeException('No directory in update archive');
         }
 
-        $archiveRoot = $dirs[0];
+        $archiveRoot = (string) $dirs[0];
         $sourceDir = $archiveRoot.'/'.normalizeRelativePath($updaterSourcePath);
         if (!is_dir($sourceDir)) {
             throw new RuntimeException('Updater source path not found in archive: '.$updaterSourcePath);
@@ -165,11 +255,19 @@ function updateUpdaterFromTag(
         );
 
         foreach ($iterator as $item) {
+            if (!$item instanceof SplFileInfo) {
+                continue;
+            }
+            $pathname = $item->getPathname();
+            $absolutePath = (is_string($pathname) || is_int($pathname)) ? (string) $pathname : '';
+            if ('' === $absolutePath) {
+                continue;
+            }
             if ($item->isDir()) {
                 continue;
             }
 
-            $relativePath = normalizeRelativePath(substr((string) $item->getPathname(), strlen($sourceDir) + 1));
+            $relativePath = normalizeRelativePath(substr($absolutePath, strlen($sourceDir) + 1));
 
             if (!isAllowedUpdaterFile($relativePath)) {
                 $skippedFiles[] = $relativePath;
@@ -187,7 +285,7 @@ function updateUpdaterFromTag(
                 mkdir($targetDir, 0755, true);
             }
 
-            if (!copy($item->getPathname(), $targetPath)) {
+            if (!copy((string) $item->getPathname(), $targetPath)) {
                 throw new RuntimeException('Failed to update file: '.$relativePath);
             }
 
@@ -216,31 +314,54 @@ class GitHubClient
         $this->userAgent = 'SymfonyGitInstaller/'.$this->installerVersion;
     }
 
+    /**
+     * @return array<mixed>
+     */
     private function request(string $endpoint): array
     {
         $url = $this->baseUrl.$endpoint;
         $headers = ['User-Agent: '.$this->userAgent, 'Accept: application/vnd.github.v3+json'];
-        if (!empty($this->token)) {
+        if ('' !== $this->token) {
             $headers[] = 'Authorization: Bearer '.$this->token;
         }
         $ch = curl_init();
-        curl_setopt_array($ch, [
+        /** @var array<int, mixed> $options */
+        $options = [
             CURLOPT_URL => $url,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_HTTPHEADER => $headers,
             CURLOPT_FOLLOWLOCATION => true,
             CURLOPT_TIMEOUT => 30,
-        ]);
+        ];
+        curl_setopt_array($ch, $options);
         $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        if (false === $response) {
+            $error = curl_error($ch);
+            curl_close($ch);
+            throw new RuntimeException("CURL Error: {$error}");
+        }
+        $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
         if ($httpCode >= 400) {
             throw new RuntimeException("GitHub API Error: HTTP {$httpCode}");
         }
 
-        return json_decode($response, true) ?? [];
+        if (is_string($response)) {
+            $decoded = json_decode($response, true);
+        } else {
+            $decoded = null;
+        }
+
+        if (!is_array($decoded)) {
+            return [];
+        }
+
+        return $decoded;
     }
 
+    /**
+     * @return array<int, array{name: string, commit: string}>
+     */
     public function getBranches(string $repo): array
     {
         $branches = [];
@@ -251,7 +372,25 @@ class GitHubClient
                 break;
             }
             foreach ($response as $branch) {
-                $branches[] = ['name' => $branch['name'], 'commit' => $branch['commit']['sha'] ?? ''];
+                if (!is_array($branch)) {
+                    continue;
+                }
+                if (isset($branch['name']) && (is_string($branch['name']) || is_int($branch['name']))) {
+                    $branchName = trim((string) $branch['name']);
+                } else {
+                    $branchName = '';
+                }
+
+                $commitData = $branch['commit'] ?? null;
+                if (is_array($commitData)) {
+                    $sha = '';
+                    if (isset($commitData['sha']) && (is_string($commitData['sha']) || is_int($commitData['sha']))) {
+                        $sha = (string) $commitData['sha'];
+                    }
+                    if ('' !== $branchName && '' !== $sha) {
+                        $branches[] = ['name' => $branchName, 'commit' => $sha];
+                    }
+                }
             }
             ++$page;
         } while (100 === count($response));
@@ -259,6 +398,9 @@ class GitHubClient
         return $branches;
     }
 
+    /**
+     * @return array<int, array{name: string, commit: string}>
+     */
     public function getTags(string $repo): array
     {
         $tags = [];
@@ -269,7 +411,25 @@ class GitHubClient
                 break;
             }
             foreach ($response as $tag) {
-                $tags[] = ['name' => $tag['name'], 'commit' => $tag['commit']['sha'] ?? ''];
+                if (!is_array($tag)) {
+                    continue;
+                }
+                if (isset($tag['name']) && (is_string($tag['name']) || is_int($tag['name']))) {
+                    $tagName = trim((string) $tag['name']);
+                } else {
+                    $tagName = '';
+                }
+
+                $commitData = $tag['commit'] ?? null;
+                if (is_array($commitData)) {
+                    $sha = '';
+                    if (isset($commitData['sha']) && (is_string($commitData['sha']) || is_int($commitData['sha']))) {
+                        $sha = (string) $commitData['sha'];
+                    }
+                    if ('' !== $tagName && '' !== $sha) {
+                        $tags[] = ['name' => $tagName, 'commit' => $sha];
+                    }
+                }
             }
             ++$page;
         } while (100 === count($response));
@@ -281,39 +441,56 @@ class GitHubClient
     {
         $url = $this->baseUrl."/repos/{$repo}/zipball/{$ref}";
         $headers = ['User-Agent: '.$this->userAgent];
-        if (!empty($this->token)) {
+        if ('' !== $this->token) {
             $headers[] = 'Authorization: Bearer '.$this->token;
         }
         $ch = curl_init();
-        curl_setopt_array($ch, [
+        /** @var array<int, mixed> $options */
+        $options = [
             CURLOPT_URL => $url,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_HTTPHEADER => $headers,
             CURLOPT_FOLLOWLOCATION => true,
             CURLOPT_TIMEOUT => 300,
-        ]);
+        ];
+        curl_setopt_array($ch, $options);
         $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        if (false === $response) {
+            $error = curl_error($ch);
+            curl_close($ch);
+            throw new RuntimeException("CURL Error: {$error}");
+        }
+        $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
         if (200 !== $httpCode) {
             throw new RuntimeException("Download failed: HTTP {$httpCode}");
         }
 
-        return $response;
+        return is_string($response) ? $response : '';
     }
 }
 
+/**
+ * @param array<string, mixed> $config
+ * @param array<string, mixed> $versionMeta
+ */
 function handleAuthentication(array $config, bool $showVersionsBeforeLogin = false, array $versionMeta = []): void
 {
-    $password = $config['password'] ?? '';
+    /** @var string $password */
+    $password = '';
+    if (isset($config['password']) && is_scalar($config['password'])) {
+        $password = (string) $config['password'];
+    }
 
-    if (empty($password)) {
+    if ('' === $password) {
         return;
     }
 
     if (isset($_GET['logout'])) {
-        session_destroy();
-        session_start();
+        if (PHP_SAPI !== 'cli') {
+            session_destroy();
+            session_start();
+        }
         $_SESSION = [];
         header('Location: ?');
         exit;
@@ -323,10 +500,10 @@ function handleAuthentication(array $config, bool $showVersionsBeforeLogin = fal
         return;
     }
 
-    if ('POST' === $_SERVER['REQUEST_METHOD'] && isset($_POST['password'])) {
-        $inputPassword = $_POST['password'] ?? '';
+    if ('POST' === $_SERVER['REQUEST_METHOD'] && isset($_POST['password']) && is_string($_POST['password'])) {
+        $inputPassword = (string) $_POST['password'];
 
-        if (password_verify((string) $inputPassword, (string) $password) || hash_equals($password, $inputPassword)) {
+        if (password_verify($inputPassword, $password) || hash_equals($password, $inputPassword)) {
             $_SESSION['gitinstall_authenticated'] = true;
             $_SESSION['gitinstall_auth_time'] = time();
             header('Location: ?');
@@ -341,17 +518,32 @@ function handleAuthentication(array $config, bool $showVersionsBeforeLogin = fal
     exit;
 }
 
+/**
+ * @param array<string, mixed> $versionMeta
+ */
 function renderLoginForm(string $error = '', array $versionMeta = []): void
 {
-    $errorHtml = $error ? '<div class="error">'.htmlspecialchars($error).'</div>' : '';
-    $text_please_enter_password = __('please_enter_password');
-    $text_password_placeholder = __('password_placeholder');
-    $text_login = __('login');
+    global $lang;
+    /** @var array<string, string> $langForLogin */
+    $langForLogin = (isset($lang) && is_array($lang)) ? $lang : [];
+
+    $errorHtml = ('' !== $error) ? '<div class="error">'.htmlspecialchars((string) $error).'</div>' : '';
+    $text_please_enter_password = resolveLangKey('please_enter_password', $langForLogin);
+    $text_password_placeholder = resolveLangKey('password_placeholder', $langForLogin);
+    $text_login = resolveLangKey('login', $langForLogin);
 
     $versionInfoHtml = '';
-    if (!empty($versionMeta)) {
-        $installerVersion = htmlspecialchars((string) ($versionMeta['installer_version'] ?? 'unknown'));
-        $projectVersion = htmlspecialchars((string) ($versionMeta['project_version'] ?? 'unknown'));
+    $installerVersionStr = '';
+    if (isset($versionMeta['installer_version']) && is_scalar($versionMeta['installer_version'])) {
+        $installerVersionStr = (string) $versionMeta['installer_version'];
+    }
+    $projectVersionStr = '';
+    if (isset($versionMeta['project_version']) && is_scalar($versionMeta['project_version'])) {
+        $projectVersionStr = (string) $versionMeta['project_version'];
+    }
+    $installerVersion = htmlspecialchars((string) $installerVersionStr);
+    $projectVersion = htmlspecialchars((string) $projectVersionStr);
+    if (isset($versionMeta['installer_version']) || isset($versionMeta['project_version'])) {
         $versionInfoHtml = '<div class="repo-info" style="margin-top:15px">'
             .'<strong>'.__('updater_version').':</strong> <code>'.$installerVersion.'</code><br>'
             .'<strong>'.__('project_version').':</strong> <code>'.$projectVersion.'</code>'
@@ -373,6 +565,9 @@ HTML;
     exit;
 }
 
+/**
+ * @return array{deleted_count: int, errors: array<string>}
+ */
 function clearCacheDirectory(string $cacheDir): array
 {
     $result = ['deleted_count' => 0, 'errors' => []];
@@ -387,7 +582,14 @@ function clearCacheDirectory(string $cacheDir): array
     );
 
     foreach ($iterator as $item) {
-        $path = $item->getPathname();
+        if (!$item instanceof SplFileInfo) {
+            continue;
+        }
+        $pathname = $item->getPathname();
+        $path = (is_string($pathname) || is_int($pathname)) ? (string) $pathname : '';
+        if ('' === $path) {
+            continue;
+        }
         try {
             if ($item->isDir()) {
                 @rmdir($path);
@@ -405,6 +607,12 @@ function clearCacheDirectory(string $cacheDir): array
     return $result;
 }
 
+/**
+ * @param array<string> $whitelistFolders
+ * @param array<string> $whitelistFiles
+ *
+ * @return array{deleted_count: int, preserved: array<string>}
+ */
 function cleanTargetDirectory(string $targetDir, array $whitelistFolders, array $whitelistFiles): array
 {
     $preserved = [];
@@ -462,11 +670,18 @@ function cleanTargetDirectory(string $targetDir, array $whitelistFolders, array 
     );
 
     foreach ($iterator as $item) {
-        $path = $item->getPathname();
+        if (!$item instanceof SplFileInfo) {
+            continue;
+        }
+        $pathname = $item->getPathname();
+        $path = (is_string($pathname) || is_int($pathname)) ? (string) $pathname : '';
+        if ('' === $path) {
+            continue;
+        }
 
         $shouldPreserve = false;
         foreach ($preservePaths as $preservePath) {
-            if ($path === $preservePath || str_starts_with((string) $path, $preservePath.'/')) {
+            if ($path === $preservePath || str_starts_with($path, (string) $preservePath.'/')) {
                 $shouldPreserve = true;
                 break;
             }
@@ -480,13 +695,21 @@ function cleanTargetDirectory(string $targetDir, array $whitelistFolders, array 
                 ++$deletedCount;
             }
         } else {
-            $preserved[] = substr((string) $path, strlen($targetDir) + 1);
+            $preserved[] = substr($path, strlen($targetDir) + 1);
         }
     }
 
     return ['deleted_count' => $deletedCount, 'preserved' => $preserved];
 }
 
+/**
+ * @param array<string> $excludeFolders
+ * @param array<string> $excludeFiles
+ * @param array<string> $whitelistFolders
+ * @param array<string> $whitelistFiles
+ *
+ * @return array{extracted: array<string>, skipped_files: array<string>, skipped_folders: array<string>}
+ */
 function extractZip(string $zipContent, string $targetDir, array $excludeFolders, array $excludeFiles, array $whitelistFolders, array $whitelistFiles): array
 {
     $tempFile = tempnam(sys_get_temp_dir(), 'gitinstall_');
@@ -519,7 +742,15 @@ function extractZip(string $zipContent, string $targetDir, array $excludeFolders
         $targetBasename = basename($targetDir);
 
         foreach ($iterator as $item) {
-            $relativePath = substr((string) $item->getPathname(), strlen($sourceDir) + 1);
+            if (!$item instanceof SplFileInfo) {
+                continue;
+            }
+            $pathname = $item->getPathname();
+            $absolutePath = (is_string($pathname) || is_int($pathname)) ? (string) $pathname : '';
+            if ('' === $absolutePath) {
+                continue;
+            }
+            $relativePath = substr($absolutePath, strlen($sourceDir) + 1);
             $relativePathNormalized = str_replace('\\', '/', $relativePath);
             $parentDir = dirname($relativePathNormalized);
             if ('.' === $parentDir) {
@@ -631,12 +862,22 @@ function recursiveDelete(string $path): void
             RecursiveIteratorIterator::CHILD_FIRST
         );
         foreach ($iterator as $item) {
-            $item->isDir() ? rmdir($item->getPathname()) : unlink($item->getPathname());
+            if (!$item instanceof SplFileInfo) {
+                continue;
+            }
+            if ($item->isDir()) {
+                rmdir($item->getPathname());
+            } else {
+                unlink($item->getPathname());
+            }
         }
         rmdir($path);
     }
 }
 
+/**
+ * @return array{app_env: string, current_db: ?string, databases: array<int, array{id: string, url: string, active: bool}>, raw_content: string}
+ */
 function parseEnvLocal(string $envPath): array
 {
     $result = [
@@ -650,7 +891,11 @@ function parseEnvLocal(string $envPath): array
         return $result;
     }
 
-    $result['raw_content'] = file_get_contents($envPath);
+    $content = file_get_contents($envPath);
+    if (false === $content) {
+        return $result;
+    }
+    $result['raw_content'] = $content;
     $lines = explode("\n", $result['raw_content']);
 
     foreach ($lines as $lineNum => $line) {
@@ -684,6 +929,9 @@ function updateEnvLocal(string $envPath, string $appEnv, string $activeDb): bool
     }
 
     $content = file_get_contents($envPath);
+    if (false === $content) {
+        return false;
+    }
     $lines = explode("\n", $content);
 
     foreach ($lines as $lineNum => &$line) {
@@ -762,8 +1010,11 @@ function removeDatabaseFromEnvLocal(string $envPath, string $dbId): bool
         return false;
     }
 
-    $content = (string) file_get_contents($envPath);
-    $lines = explode("\n", $content);
+    $rawContent = file_get_contents($envPath);
+    if (false === $rawContent) {
+        return false;
+    }
+    $lines = explode("\n", $rawContent);
     $keptLines = [];
     $removed = false;
 
@@ -786,19 +1037,27 @@ function removeDatabaseFromEnvLocal(string $envPath, string $dbId): bool
     return false !== file_put_contents($envPath, implode("\n", $keptLines));
 }
 
+/**
+ * @return array{html: string, count: int, error: bool, no_migrations?: bool, no_db?: bool}
+ */
 function getMigrationsStatus(string $targetDir): array
 {
+    global $lang;
+    /** @var array<string, string> $langForMigrations */
+    $langForMigrations = (isset($lang) && is_array($lang)) ? $lang : [];
+
     $console = rtrim($targetDir, '/').'/bin/console';
     if (!file_exists($console)) {
         return ['html' => 'bin/console not found', 'count' => 0, 'error' => true];
     }
 
     $migrationsDir = rtrim($targetDir, '/').'/migrations';
-    $hasMigrations = is_dir($migrationsDir) && count(glob($migrationsDir.'/*.php')) > 0;
+    $foundMigrations = glob($migrationsDir.'/*.php');
+    $hasMigrations = is_dir($migrationsDir) && false !== $foundMigrations && count($foundMigrations) > 0;
 
     if (!$hasMigrations) {
         return [
-            'html' => '<span style="color:#6a737d;">'.__('no_migrations_found').'</span>',
+            'html' => '<span style="color:#6a737d;">'.resolveLangKey('no_migrations_found', $langForMigrations).'</span>',
             'count' => 0,
             'error' => false,
             'no_migrations' => true,
@@ -806,11 +1065,7 @@ function getMigrationsStatus(string $targetDir): array
     }
 
     $cmd = 'php '.escapeshellarg($console).' doctrine:migrations:status --no-interaction 2>&1';
-    $output = shell_exec($cmd);
-
-    if (null === $output) {
-        return ['html' => 'Could not execute migrations:status', 'count' => 0, 'error' => true];
-    }
+    $output = (string) shell_exec($cmd);
 
     // Try to find the line with "New Migrations"
     if (preg_match('/New Migrations:\s+(\d+)/i', $output, $matches)) {
@@ -824,33 +1079,36 @@ function getMigrationsStatus(string $targetDir): array
         }
 
         return [
-            'html' => '<span style="color:#28a745; font-weight:bold;">'.__('no_migrations_to_execute').'</span>',
+            'html' => '<span style="color:#28a745; font-weight:bold;">'.resolveLangKey('no_migrations_to_execute', $langForMigrations).'</span>',
             'count' => 0,
             'error' => false,
         ];
     }
 
     // Handle errors: extract message from JSON if possible, or just take first line
-    if (str_starts_with(trim($output), '{')) {
-        $json = json_decode($output, true);
-        if (isset($json['message'])) {
-            $msg = $json['message'];
+    $trimmedOutput = trim((string) $output);
+    if (str_starts_with($trimmedOutput, '{')) {
+        $json = json_decode($trimmedOutput, true);
+        if (is_array($json) && isset($json['message']) && is_scalar($json['message'])) {
+            $msg = (string) $json['message'];
             // If it's a long message with "Message: ...", try to extract the inner message
-            if (preg_match('/Message: "(.*?)"/s', (string) $msg, $m)) {
-                $msg = $m[1];
+            if (preg_match('/Message: "(.*?)"/s', $msg, $m)) {
+                $msg = (string) $m[1];
             }
 
-            if (str_contains((string) $msg, 'could not find driver') || str_contains((string) $msg, 'Connection refused')) {
+            if (str_contains($msg, 'could not find driver') || str_contains($msg, 'Connection refused')) {
                 return [
-                    'html' => '<span style="color:#6a737d;">'.__('migrations_disabled_no_db').'</span>',
+                    'html' => '<span style="color:#6a737d;">'.resolveLangKey('migrations_disabled_no_db', $langForMigrations).'</span>',
                     'count' => 0,
                     'error' => false,
                     'no_db' => true,
                 ];
             }
 
+            $errorMsg = (string) strtok($msg, "\n");
+
             return [
-                'html' => '<span style="color:#d73a49; font-size:0.9em;">Error: '.htmlspecialchars(strtok($msg, "\n")).'</span>',
+                'html' => '<span style="color:#d73a49; font-size:0.9em;">Error: '.htmlspecialchars($errorMsg).'</span>',
                 'count' => 0,
                 'error' => true,
             ];
@@ -858,14 +1116,14 @@ function getMigrationsStatus(string $targetDir): array
     }
 
     // Fallback: take first non-empty line
-    $lines = explode("\n", trim($output));
+    $lines = explode("\n", $trimmedOutput);
     foreach ($lines as $line) {
         $line = trim($line);
         if ('' !== $line && !str_contains($line, 'CRITICAL') && !str_contains($line, 'DEBUG')) {
             // Check for common Doctrine/PDO errors to make them compact
             if (str_contains($line, 'ExceptionConverter.php') || str_contains($line, 'Connection refused') || str_contains($line, 'could not find driver')) {
                 return [
-                    'html' => '<span style="color:#6a737d;">'.__('migrations_disabled_no_db').'</span>',
+                    'html' => '<span style="color:#6a737d;">'.resolveLangKey('migrations_disabled_no_db', $langForMigrations).'</span>',
                     'count' => 0,
                     'error' => false,
                     'no_db' => true,
@@ -880,8 +1138,10 @@ function getMigrationsStatus(string $targetDir): array
         }
     }
 
+    $errorMsgFallback = (string) strtok($trimmedOutput, "\n");
+
     return [
-        'html' => '<span style="color:#d73a49; font-size:0.9em;">Error: '.htmlspecialchars(strtok(trim($output), "\n")).'</span>',
+        'html' => '<span style="color:#d73a49; font-size:0.9em;">Error: '.htmlspecialchars($errorMsgFallback).'</span>',
         'count' => 0,
         'error' => true,
     ];
@@ -889,17 +1149,31 @@ function getMigrationsStatus(string $targetDir): array
 
 function renderPage(string $title, string $content, ?string $error = null, ?string $envPath = null, bool $showLogout = false): string
 {
-    $errorHtml = $error ? '<div class="error">'.htmlspecialchars($error).'</div>' : '';
-    $homeButton = '<a href="?" class="btn btn-secondary btn-small home-btn">'.__('home').'</a>';
-    $logoutButton = $showLogout ? '<form method="get" class="logout-form"><input type="hidden" name="logout" value="1"><button type="submit" class="btn btn-secondary btn-small">'.__('logout').'</button></form>' : '';
+    global $lang;
+    /** @var array<string, string> $langForPage */
+    $langForPage = (isset($lang) && is_array($lang)) ? $lang : [];
 
-    $text_language = __('language');
+    $errorHtml = (null !== $error && '' !== $error) ? '<div class="error">'.htmlspecialchars((string) $error).'</div>' : '';
+    $text_home = resolveLangKey('home', $langForPage);
+    $homeButton = '<a href="?" class="btn btn-secondary btn-small home-btn">'.htmlspecialchars($text_home).'</a>';
+    $text_logout = resolveLangKey('logout', $langForPage);
+    $logoutButton = $showLogout ? '<form method="get" class="logout-form"><input type="hidden" name="logout" value="1"><button type="submit" class="btn btn-secondary btn-small">'.htmlspecialchars($text_logout).'</button></form>' : '';
+
+    $text_language = resolveLangKey('language', $langForPage);
     $langOptions = '';
     global $availableLangs;
-    foreach ($availableLangs as $code) {
-        $selected = $_SESSION['lang'] === $code ? 'selected' : '';
-        $langName = strtoupper((string) $code);
-        $langOptions .= '<option value="'.$code.'" '.$selected.'>'.$langName.'</option>';
+    /** @var array<string> $availableLangs */
+    if (is_iterable($availableLangs)) {
+        foreach ($availableLangs as $code) {
+            $codeStr = (is_scalar($code)) ? (string) $code : '';
+            if ('' === $codeStr) {
+                continue;
+            }
+            $sessionLangVal = (isset($_SESSION['lang']) && is_string($_SESSION['lang'])) ? (string) $_SESSION['lang'] : 'en';
+            $selected = $sessionLangVal === $codeStr ? 'selected' : '';
+            $langName = (string) strtoupper($codeStr);
+            $langOptions .= '<option value="'.htmlspecialchars($codeStr).'" '.$selected.'>'.htmlspecialchars($langName).'</option>';
+        }
     }
 
     $langSwitcherHtml = <<<HTML
@@ -919,43 +1193,56 @@ HTML;
     $dashboardScript = '';
     if (null !== $envPath) {
         $envConfig = parseEnvLocal($envPath);
+        global $lang;
+        /** @var array<string, string> $langForTemplate */
+        $langForTemplate = (isset($lang) && is_array($lang)) ? $lang : [];
 
         $devSelected = 'dev' === $envConfig['app_env'] ? 'selected' : '';
         $prodSelected = 'prod' === $envConfig['app_env'] ? 'selected' : '';
 
         $dbOptions = '';
         foreach ($envConfig['databases'] as $db) {
-            $selected = $db['active'] ? 'selected' : '';
-            $dbOptions .= '<option value="'.htmlspecialchars((string) $db['id']).'" '.$selected.'>'.htmlspecialchars((string) $db['id']).'</option>';
+            $dbIdVal = (isset($db['id']) && is_scalar($db['id'])) ? (string) $db['id'] : '';
+            if ('' === $dbIdVal) {
+                continue;
+            }
+            $selected = (!empty($db['active'])) ? 'selected' : '';
+            $dbOptions .= '<option value="'.htmlspecialchars($dbIdVal).'" '.$selected.'>'.htmlspecialchars($dbIdVal).'</option>';
         }
 
-        $text_mode = __('mode');
-        $text_database = __('database');
-        $text_save = __('save');
-        $text_env_editor = __('env_editor');
-        $text_env_content = __('env_content');
-        $text_save_env_file = __('save_env_file');
-        $text_db_manager = __('database_manager');
-        $text_db_id = __('database_id');
-        $text_db_url = __('database_url');
-        $text_add_database = __('add_database');
-        $text_remove_database = __('remove_database');
-        $text_select_database = __('select_database');
-        $text_dashboard_updates = __('dashboard_updates');
-        $text_dashboard_environment = __('dashboard_environment');
-        $text_dashboard_databases = __('dashboard_databases');
-        $text_migrations_status = __('migrations_status');
-        $text_run_migrations = __('run_migrations');
-        $confirm_run_migrations = __('confirm_run_migrations');
+        $text_mode = resolveLangKey('mode', $langForTemplate);
+        $text_database = resolveLangKey('database', $langForTemplate);
+        $text_save = resolveLangKey('save', $langForTemplate);
+        $text_env_editor = resolveLangKey('env_editor', $langForTemplate);
+        $text_env_content = resolveLangKey('env_content', $langForTemplate);
+        $text_save_env_file = resolveLangKey('save_env_file', $langForTemplate);
+        $text_db_manager = resolveLangKey('database_manager', $langForTemplate);
+        $text_db_id = resolveLangKey('database_id', $langForTemplate);
+        $text_db_url = resolveLangKey('database_url', $langForTemplate);
+        $text_add_database = resolveLangKey('add_database', $langForTemplate);
+        $text_remove_database = resolveLangKey('remove_database', $langForTemplate);
+        $text_select_database = resolveLangKey('select_database', $langForTemplate);
+        $text_dashboard_updates = resolveLangKey('dashboard_updates', $langForTemplate);
+        $text_dashboard_environment = resolveLangKey('dashboard_environment', $langForTemplate);
+        $text_dashboard_databases = resolveLangKey('dashboard_databases', $langForTemplate);
+        $text_migrations_status = resolveLangKey('migrations_status', $langForTemplate);
+        $text_run_migrations = resolveLangKey('run_migrations', $langForTemplate);
+        $confirm_run_migrations = resolveLangKey('confirm_run_migrations', $langForTemplate);
 
         $migrationsData = getMigrationsStatus(dirname(__DIR__, 2));
-        $migrationsStatusHtml = $migrationsData['html'];
-        $migrationsDisabled = (0 === $migrationsData['count'] || $migrationsData['error'] || isset($migrationsData['no_migrations']) || isset($migrationsData['no_db'])) ? 'disabled' : '';
+        /** @var string $migrationsStatusHtml */
+        $migrationsStatusHtml = (isset($migrationsData['html']) && is_scalar($migrationsData['html'])) ? (string) $migrationsData['html'] : '';
+        $migrationsCount = (isset($migrationsData['count']) && is_scalar($migrationsData['count'])) ? (int) $migrationsData['count'] : 0;
+        $migrationsDisabled = (0 === $migrationsCount || !empty($migrationsData['error']) || isset($migrationsData['no_migrations']) || isset($migrationsData['no_db'])) ? 'disabled' : '';
 
         $dbRemoveOptions = '';
         foreach ($envConfig['databases'] as $db) {
-            $dbLabel = htmlspecialchars($db['id'].($db['active'] ? ' (active)' : ''));
-            $dbValue = htmlspecialchars((string) $db['id']);
+            $dbIdStr = (isset($db['id']) && is_scalar($db['id'])) ? (string) $db['id'] : '';
+            if ('' === $dbIdStr) {
+                continue;
+            }
+            $dbLabel = htmlspecialchars($dbIdStr.((!empty($db['active'])) ? ' (active)' : ''));
+            $dbValue = htmlspecialchars($dbIdStr);
             $dbRemoveOptions .= '<option value="'.$dbValue.'">'.$dbLabel.'</option>';
         }
 
@@ -1079,11 +1366,19 @@ function showDashboardSection(section){
 HTML;
     }
 
-    $appTitle = __('title');
+    global $lang;
+    /** @var array<string, string> $langForTitle */
+    $langForTitle = (isset($lang) && is_array($lang)) ? $lang : [];
+    $appTitle = resolveLangKey('title', $langForTitle);
+    $sessionLangForTitle = 'en';
+    if (isset($_SESSION['lang']) && is_string($_SESSION['lang'])) {
+        $sessionLangForTitle = $_SESSION['lang'];
+    }
+    $langCode = $sessionLangForTitle;
 
     return <<<HTML
 <!DOCTYPE html>
-<html lang="{$_SESSION['lang']}">
+<html lang="{$langCode}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -1171,17 +1466,88 @@ HTML;
 }
 
 try {
-    $repository = $config['repository'] ?? '';
-    $token = $config['github_token'] ?? '';
-    $apiBaseUrl = $config['api_base_url'] ?? 'https://api.github.com';
-    $targetDirRelative = $config['target_directory'] ?? '../';
-    $showVersionsBeforeLogin = (bool) ($config['show_versions_before_login'] ?? false);
-    $currentProjectVersion = (string) ($config['project_version'] ?? 'unknown');
-    $excludeFolders = $config['exclude_folders'] ?? [];
-    $excludeFiles = $config['exclude_files'] ?? [];
-    $whitelistFolders = $config['whitelist_folders'] ?? [];
-    $whitelistFiles = $config['whitelist_files'] ?? [];
+    $repository = '';
+    if (isset($config['repository']) && (is_string($config['repository']) || is_int($config['repository']))) {
+        $repository = (string) $config['repository'];
+    }
 
+    $token = '';
+    if (isset($config['github_token']) && (is_string($config['github_token']) || is_int($config['github_token']))) {
+        $token = (string) $config['github_token'];
+    }
+
+    $apiBaseUrl = '';
+    if (isset($config['api_base_url']) && (is_string($config['api_base_url']) || is_int($config['api_base_url']))) {
+        $apiBaseUrl = (string) $config['api_base_url'];
+    }
+    if ('' === $apiBaseUrl) {
+        $apiBaseUrl = 'https://api.github.com';
+    }
+
+    $targetDirRelative = '';
+    if (isset($config['target_directory']) && (is_string($config['target_directory']) || is_int($config['target_directory']))) {
+        $targetDirRelative = (string) $config['target_directory'];
+    }
+    if ('' === $targetDirRelative) {
+        $targetDirRelative = '../';
+    }
+
+    $showVersionsBeforeLogin = (bool) ($config['show_versions_before_login'] ?? false);
+
+    $currentProjectVersion = 'unknown';
+    if (isset($config['project_version']) && (is_string($config['project_version']) || is_int($config['project_version']))) {
+        $currentProjectVersion = (string) $config['project_version'];
+    }
+
+    $rawExcludeFolders = $config['exclude_folders'] ?? [];
+    /** @var array<string> $excludeFolders */
+    $excludeFolders = [];
+    if (is_array($rawExcludeFolders)) {
+        foreach ($rawExcludeFolders as $val) {
+            $valStr = (is_scalar($val)) ? (string) $val : '';
+            if ('' !== $valStr) {
+                $excludeFolders[] = $valStr;
+            }
+        }
+    }
+
+    $rawExcludeFiles = $config['exclude_files'] ?? [];
+    /** @var array<string> $excludeFiles */
+    $excludeFiles = [];
+    if (is_array($rawExcludeFiles)) {
+        foreach ($rawExcludeFiles as $val) {
+            $valStr = (is_scalar($val)) ? (string) $val : '';
+            if ('' !== $valStr) {
+                $excludeFiles[] = $valStr;
+            }
+        }
+    }
+
+    $rawWhitelistFolders = $config['whitelist_folders'] ?? [];
+    /** @var array<string> $whitelistFolders */
+    $whitelistFolders = [];
+    if (is_array($rawWhitelistFolders)) {
+        foreach ($rawWhitelistFolders as $val) {
+            $valStr = (is_scalar($val)) ? (string) $val : '';
+            if ('' !== $valStr) {
+                $whitelistFolders[] = $valStr;
+            }
+        }
+    }
+
+    $rawWhitelistFiles = $config['whitelist_files'] ?? [];
+    /** @var array<string> $whitelistFiles */
+    $whitelistFiles = [];
+    if (is_array($rawWhitelistFiles)) {
+        foreach ($rawWhitelistFiles as $val) {
+            $valStr = (is_scalar($val)) ? (string) $val : '';
+            if ('' !== $valStr) {
+                $whitelistFiles[] = $valStr;
+            }
+        }
+    }
+
+    $envPath = null;
     if (empty($repository)) {
         throw new RuntimeException(__('repository_not_configured'));
     }
@@ -1202,198 +1568,255 @@ try {
 
     $versionProbeClient = new GitHubClient($apiBaseUrl, $token);
     $tags = $versionProbeClient->getTags($repository);
-    $currentInstallerVersion = resolveInstallerVersion($config, $tags);
+    /** @var array<string, mixed> $configForResolver */
+    $configForResolver = $config;
+    /** @var array<int, array{name: string, commit: string}> $tagsForResolver */
+    $tagsForResolver = $tags;
+    $resInstVer = resolveInstallerVersion($configForResolver, $tagsForResolver);
+    $currentInstallerVersion = $resInstVer;
 
+    /** @var array<string, mixed> $configForAuth */
+    $configForAuth = $config;
+    /** @var array<string, mixed> $metaForAuth */
+    $metaForAuth = [
+        'installer_version' => (string) $currentInstallerVersion,
+        'project_version' => (string) $currentProjectVersion,
+    ];
     handleAuthentication(
-        $config,
+        $configForAuth,
         $showVersionsBeforeLogin,
-        [
-            'installer_version' => $currentInstallerVersion,
-            'project_version' => $currentProjectVersion,
-        ]
+        $metaForAuth
     );
 
     $client = new GitHubClient($apiBaseUrl, $token, $currentInstallerVersion);
 
+    $targetDirStr = (string) $targetDir;
+    /** @var non-empty-string $targetDirFinal */
+    $targetDirFinal = (strlen($targetDirStr) > 0) ? $targetDirStr : '.';
+    $targetDirStr = $targetDirFinal;
+
+    global $lang;
+    /** @var array<string, string> $langForGlobal */
+    $langForGlobal = (isset($lang) && is_array($lang)) ? $lang : [];
+
     if ('POST' === $_SERVER['REQUEST_METHOD'] && isset($_POST['save_env'])) {
-        $envPath = rtrim($targetDir, '/').'/.env.local';
-        $newEnv = $_POST['app_env'] ?? 'prod';
-        $newDb = $_POST['database'] ?? 'DB1';
+        $envPath = rtrim($targetDirStr, '/').'/.env.local';
+        $newEnv = 'prod';
+        if (isset($_POST['app_env']) && is_scalar($_POST['app_env'])) {
+            $newEnv = (string) $_POST['app_env'];
+        }
+        $newDb = 'DB1';
+        if (isset($_POST['database']) && is_scalar($_POST['database'])) {
+            $newDb = (string) $_POST['database'];
+        }
 
         if (updateEnvLocal($envPath, $newEnv, $newDb)) {
-            $content = '<div class="success">'.__('config_saved').'<br>';
-            $content .= '<strong>'.__('mode').':</strong> '.htmlspecialchars((string) $newEnv).'<br>';
-            $content .= '<strong>'.__('database').':</strong> '.htmlspecialchars((string) $newDb).'</div>';
-            $content .= '<a href="?" class="back-link">'.__('back').'</a>';
-            echo renderPage(__('configuration'), $content, null, $envPath, !empty($config['password'] ?? ''));
+            $content = '<div class="success">'.resolveLangKey('config_saved', $langForGlobal).'<br>';
+            $content .= '<strong>'.resolveLangKey('mode', $langForGlobal).':</strong> '.htmlspecialchars($newEnv).'<br>';
+            $content .= '<strong>'.resolveLangKey('database', $langForGlobal).':</strong> '.htmlspecialchars($newDb).'</div>';
+            $content .= '<a href="?" class="back-link">'.resolveLangKey('back', $langForGlobal).'</a>';
+            echo renderPage(resolveLangKey('configuration', $langForGlobal), $content, null, $envPath, !empty($config['password'] ?? ''));
             exit;
         }
         $error = 'Error saving .env.local';
     }
 
     if ('POST' === $_SERVER['REQUEST_METHOD'] && isset($_POST['save_env_content'])) {
-        $envPath = rtrim($targetDir, '/').'/.env.local';
-        $newContent = (string) ($_POST['env_content'] ?? '');
+        $envPath = rtrim($targetDirFinal, '/').'/.env.local';
+        $newContent = '';
+        if (isset($_POST['env_content']) && is_scalar($_POST['env_content'])) {
+            $newContent = (string) $_POST['env_content'];
+        }
 
         if (saveEnvLocalContent($envPath, $newContent)) {
-            $content = '<div class="success">'.__('env_file_saved').'</div>';
-            $content .= '<a href="?" class="back-link">'.__('back').'</a>';
-            echo renderPage(__('configuration'), $content, null, $envPath, !empty($config['password'] ?? ''));
+            $content = '<div class="success">'.resolveLangKey('env_file_saved', $langForGlobal).'</div>';
+            $content .= '<a href="?" class="back-link">'.resolveLangKey('back', $langForGlobal).'</a>';
+            echo renderPage(resolveLangKey('configuration', $langForGlobal), $content, null, $envPath, !empty($config['password'] ?? ''));
             exit;
         }
 
-        throw new RuntimeException(__('env_file_save_failed'));
+        throw new RuntimeException(resolveLangKey('env_file_save_failed', $langForGlobal));
     }
 
     if ('POST' === $_SERVER['REQUEST_METHOD'] && isset($_POST['add_database'])) {
-        $envPath = rtrim($targetDir, '/').'/.env.local';
-        $dbId = (string) ($_POST['db_id'] ?? '');
-        $dbUrl = (string) ($_POST['db_url'] ?? '');
+        $envPath = rtrim($targetDirFinal, '/').'/.env.local';
+        $dbId = '';
+        if (isset($_POST['db_id']) && is_scalar($_POST['db_id'])) {
+            $dbId = (string) $_POST['db_id'];
+        }
+        $dbUrl = '';
+        if (isset($_POST['db_url']) && is_scalar($_POST['db_url'])) {
+            $dbUrl = (string) $_POST['db_url'];
+        }
 
         if (addDatabaseToEnvLocal($envPath, $dbId, $dbUrl)) {
-            $content = '<div class="success">'.__('database_added', ['id' => htmlspecialchars($dbId)]).'</div>';
-            $content .= '<a href="?" class="back-link">'.__('back').'</a>';
-            echo renderPage(__('configuration'), $content, null, $envPath, !empty($config['password'] ?? ''));
+            $content = '<div class="success">'.resolveLangKey('database_added', $langForGlobal, ['id' => htmlspecialchars($dbId)]).'</div>';
+            $content .= '<a href="?" class="back-link">'.resolveLangKey('back', $langForGlobal).'</a>';
+            echo renderPage(resolveLangKey('configuration', $langForGlobal), $content, null, $envPath, !empty($config['password'] ?? ''));
             exit;
         }
 
-        throw new RuntimeException(__('database_add_failed'));
+        throw new RuntimeException(resolveLangKey('database_add_failed', $langForGlobal));
     }
 
     if ('POST' === $_SERVER['REQUEST_METHOD'] && isset($_POST['remove_database'])) {
-        $envPath = rtrim($targetDir, '/').'/.env.local';
-        $removeDbId = (string) ($_POST['remove_db_id'] ?? '');
+        $envPath = rtrim($targetDirFinal, '/').'/.env.local';
+        $removeDbId = '';
+        if (isset($_POST['remove_db_id']) && is_scalar($_POST['remove_db_id'])) {
+            $removeDbId = (string) $_POST['remove_db_id'];
+        }
 
         if (removeDatabaseFromEnvLocal($envPath, $removeDbId)) {
-            $content = '<div class="success">'.__('database_removed', ['id' => htmlspecialchars($removeDbId)]).'</div>';
-            $content .= '<a href="?" class="back-link">'.__('back').'</a>';
-            echo renderPage(__('configuration'), $content, null, $envPath, !empty($config['password'] ?? ''));
+            $content = '<div class="success">'.resolveLangKey('database_removed', $langForGlobal, ['id' => htmlspecialchars($removeDbId)]).'</div>';
+            $content .= '<a href="?" class="back-link">'.resolveLangKey('back', $langForGlobal).'</a>';
+            echo renderPage(resolveLangKey('configuration', $langForGlobal), $content, null, $envPath, !empty($config['password'] ?? ''));
             exit;
         }
 
-        throw new RuntimeException(__('database_remove_failed'));
+        throw new RuntimeException(resolveLangKey('database_remove_failed', $langForGlobal));
     }
 
     if ('POST' === $_SERVER['REQUEST_METHOD'] && isset($_POST['run_migrations'])) {
-        $console = rtrim($targetDir, '/').'/bin/console';
+        $envPath = rtrim($targetDirFinal, '/').'/.env.local';
+        $console = rtrim($targetDirFinal, '/').'/bin/console';
         $cmd = 'php '.escapeshellarg($console).' doctrine:migrations:migrate --no-interaction 2>&1';
         $output = shell_exec($cmd);
 
-        $content = '<div class="success">'.__('migrations_run_successfully').'</div>';
-        $content .= '<h3>'.__('migrations_output').'</h3>';
+        $content = '<div class="success">'.resolveLangKey('migrations_run_successfully', $langForGlobal).'</div>';
+        $content .= '<h3>'.resolveLangKey('migrations_output', $langForGlobal).'</h3>';
         $content .= '<pre style="background:#f6f8fa; padding:15px; border-radius:6px; font-size:0.9em; white-space:pre-wrap;">'.htmlspecialchars(trim((string) $output)).'</pre>';
-        $content .= '<a href="?" class="back-link">'.__('back').'</a>';
-        echo renderPage(__('run_migrations'), $content, null, $envPath, !empty($config['password'] ?? ''));
+        $content .= '<a href="?" class="back-link">'.resolveLangKey('back', $langForGlobal).'</a>';
+        echo renderPage(resolveLangKey('run_migrations', $langForGlobal), $content, null, $envPath, !empty($config['password'] ?? ''));
         exit;
     }
 
     if ('POST' === $_SERVER['REQUEST_METHOD'] && isset($_POST['clear_cache'])) {
-        $cacheDir = rtrim($targetDir, '/').'/var';
+        $cacheDir = rtrim($targetDirFinal, '/').'/var';
+        $envPath = rtrim($targetDirFinal, '/').'/.env.local';
         $cacheResult = clearCacheDirectory($cacheDir);
 
-        $content = '<div class="success">'.__('cache_cleared').'<br>';
-        $content .= __('files_deleted', ['count' => $cacheResult['deleted_count'], 'dir' => htmlspecialchars($cacheDir)]);
-        if (!empty($cacheResult['errors'])) {
-            $content .= '<br><small>'.__('errors').': '.count($cacheResult['errors']).'</small>';
+        $errorsCount = (int) count($cacheResult['errors']);
+        $content = '<div class="success">'.resolveLangKey('cache_cleared', $langForGlobal).'<br>';
+        $content .= resolveLangKey('files_deleted', $langForGlobal, ['count' => (int) $cacheResult['deleted_count'], 'dir' => htmlspecialchars($cacheDir)]);
+        if ($errorsCount > 0) {
+            $content .= '<br><small>'.resolveLangKey('errors', $langForGlobal).': '.$errorsCount.'</small>';
         }
         $content .= '</div>';
-        $content .= '<a href="?" class="back-link">'.__('back').'</a>';
-        echo renderPage(__('cache_cleared'), $content, null, $envPath, !empty($config['password'] ?? ''));
+        $content .= '<a href="?" class="back-link">'.resolveLangKey('back', $langForGlobal).'</a>';
+        echo renderPage(resolveLangKey('cache_cleared', $langForGlobal), $content, null, $envPath, !empty($config['password'] ?? ''));
         exit;
     }
 
     if ('POST' === $_SERVER['REQUEST_METHOD'] && isset($_POST['self_update'])) {
-        $tag = trim((string) ($_POST['ref'] ?? ''));
+        $tag = '';
+        if (isset($_POST['ref']) && is_scalar($_POST['ref'])) {
+            $tag = trim((string) $_POST['ref']);
+        }
         if ('' === $tag) {
-            throw new RuntimeException(__('no_ref_specified'));
+            throw new RuntimeException(resolveLangKey('no_ref_specified', $langForGlobal));
         }
 
-        $tagNames = array_map(static fn (array $tagItem): string => (string) ($tagItem['name'] ?? ''), $tags);
+        $tagNames = array_map(static fn (array $tagItem): string => $tagItem['name'], $tags);
         if (!in_array($tag, $tagNames, true)) {
-            throw new RuntimeException(__('tag_not_found'));
+            throw new RuntimeException(resolveLangKey('tag_not_found', $langForGlobal));
         }
 
         if (!canUpdateInstallerToTag($currentInstallerVersion, $tag)) {
-            throw new RuntimeException(__('downgrade_not_allowed'));
+            throw new RuntimeException(resolveLangKey('downgrade_not_allowed', $langForGlobal));
         }
 
-        $updaterSourcePath = $config['updater_source_path'] ?? 'public/update';
+        $updaterSourcePath = 'public/update';
+        if (isset($config['updater_source_path']) && is_scalar($config['updater_source_path'])) {
+            $updaterSourcePath = (string) $config['updater_source_path'];
+        }
         $selfUpdateResult = updateUpdaterFromTag($client, $repository, $tag, $updaterSourcePath, __DIR__);
-        $updatedCount = count($selfUpdateResult['updated_files']);
+        $updatedCount = (int) count($selfUpdateResult['updated_files']);
 
         writeConfigValues($configPath, [
-            'installer_version' => $tag,
-            'project_version' => $currentProjectVersion,
+            'installer_version' => (string) $tag,
+            'project_version' => (string) $currentProjectVersion,
         ]);
 
-        $content = '<div class="success">'.__('updater_updated', ['tag' => htmlspecialchars($tag)]).'<br>';
-        $content .= __('files_updated', ['count' => $updatedCount]).'</div>';
-        $content .= '<a href="?" class="back-link">'.__('back').'</a>';
+        $content = '<div class="success">'.resolveLangKey('updater_updated', $langForGlobal, ['tag' => htmlspecialchars($tag)]).'<br>';
+        $content .= resolveLangKey('files_updated', $langForGlobal, ['count' => $updatedCount]).'</div>';
+        $content .= '<a href="?" class="back-link">'.resolveLangKey('back', $langForGlobal).'</a>';
 
         if ($updatedCount > 0) {
-            $content .= '<h3>'.__('updated_files').'</h3><ul class="file-list">';
-            foreach ($selfUpdateResult['updated_files'] as $file) {
-                $content .= '<li>'.htmlspecialchars((string) $file).'</li>';
+            $content .= '<h3>'.resolveLangKey('updated_files', $langForGlobal).'</h3><ul class="file-list">';
+            /** @var array<string> $updatedFilesList */
+            $updatedFilesList = $selfUpdateResult['updated_files'];
+            foreach ($updatedFilesList as $file) {
+                $content .= '<li>'.htmlspecialchars($file).'</li>';
             }
             $content .= '</ul>';
         }
 
-        echo renderPage(__('title'), $content, null, $envPath, !empty($config['password'] ?? ''));
+        $envPath = rtrim($targetDirFinal, '/').'/.env.local';
+        echo renderPage(resolveLangKey('title', $langForGlobal), $content, null, $envPath, !empty($config['password'] ?? ''));
         exit;
     }
 
     if ('POST' === $_SERVER['REQUEST_METHOD'] && isset($_POST['install'])) {
-        $ref = $_POST['ref'] ?? '';
-        $refType = $_POST['ref_type'] ?? 'branch';
-        if (empty($ref)) {
-            throw new RuntimeException(__('no_ref_specified'));
+        $ref = '';
+        if (isset($_POST['ref']) && is_scalar($_POST['ref'])) {
+            $ref = (string) $_POST['ref'];
+        }
+        $refType = 'branch';
+        if (isset($_POST['ref_type']) && is_scalar($_POST['ref_type'])) {
+            $refType = (string) $_POST['ref_type'];
+        }
+        if ('' === $ref) {
+            throw new RuntimeException(resolveLangKey('no_ref_specified', $langForGlobal));
         }
 
         writeConfigValues($configPath, [
-            'installer_version' => $currentInstallerVersion,
-            'project_version' => $ref,
+            'installer_version' => (string) $currentInstallerVersion,
+            'project_version' => (string) $ref,
         ]);
 
-        $cleanResult = cleanTargetDirectory($targetDir, $whitelistFolders, $whitelistFiles);
+        $cleanResult = cleanTargetDirectory((string) $targetDirStr, $whitelistFolders, $whitelistFiles);
 
         $zipContent = $client->downloadArchive($repository, $ref, $refType);
-        $result = extractZip($zipContent, $targetDir, $excludeFolders, $excludeFiles, $whitelistFolders, $whitelistFiles);
+        $extractZipResult = extractZip($zipContent, (string) $targetDirStr, $excludeFolders, $excludeFiles, $whitelistFolders, $whitelistFiles);
 
-        $extractedCount = count($result['extracted']);
-        $skippedFilesCount = count($result['skipped_files']);
-        $skippedFoldersCount = count($result['skipped_folders']);
+        $extractedCount = count($extractZipResult['extracted']);
+        $skippedFilesCount = count($extractZipResult['skipped_files']);
+        $skippedFoldersCount = count($extractZipResult['skipped_folders']);
         $preservedCount = count($cleanResult['preserved']);
 
-        $content = '<div class="success">'.__('installation_successful').'<br>';
-        $content .= __('files_extracted', ['count' => $extractedCount, 'dir' => htmlspecialchars($targetDir)]);
+        $content = '<div class="success">'.resolveLangKey('installation_successful', $langForGlobal).'<br>';
+        $content .= resolveLangKey('files_extracted', $langForGlobal, ['count' => $extractedCount, 'dir' => htmlspecialchars((string) $targetDirStr)]);
         if ($preservedCount > 0) {
-            $content .= '<br>'.__('preserved_files', ['count' => $preservedCount]);
+            $content .= '<br>'.resolveLangKey('preserved_files', $langForGlobal, ['count' => $preservedCount]);
         }
         if ($skippedFilesCount > 0 || $skippedFoldersCount > 0) {
-            $content .= '<br><small>'.__('skipped', ['folders' => $skippedFoldersCount, 'files' => $skippedFilesCount]).'</small>';
+            $content .= '<br><small>'.resolveLangKey('skipped', $langForGlobal, ['folders' => $skippedFoldersCount, 'files' => $skippedFilesCount]).'</small>';
         }
         $content .= '</div>';
 
         if ($preservedCount > 0) {
-            $content .= '<div class="warning"><strong>'.__('preserved_list_title').'</strong><ul class="file-list">';
+            $content .= '<div class="warning"><strong>'.resolveLangKey('preserved_list_title', $langForGlobal).'</strong><ul class="file-list">';
             foreach (array_slice($cleanResult['preserved'], 0, 20) as $item) {
                 $content .= '<li>'.htmlspecialchars((string) $item).'</li>';
             }
             if ($preservedCount > 20) {
-                $content .= '<li><em>'.__('and_more', ['count' => ($preservedCount - 20)]).'</em></li>';
+                $content .= '<li><em>'.resolveLangKey('and_more', $langForGlobal, ['count' => ($preservedCount - 20)]).'</em></li>';
             }
             $content .= '</ul></div>';
         }
 
-        $content .= '<a href="?" class="back-link">'.__('back').'</a><h3>'.__('installed_files').'</h3><ul class="file-list">';
-        foreach (array_slice($result['extracted'], 0, 50) as $file) {
-            $content .= '<li>'.htmlspecialchars((string) $file).'</li>';
+        $content .= '<a href="?" class="back-link">'.htmlspecialchars((string) resolveLangKey('back', $langForGlobal)).'</a><h3>'.htmlspecialchars((string) resolveLangKey('installed_files', $langForGlobal)).'</h3><ul class="file-list">';
+        /** @var array<string> $extractedFiles */
+        $extractedFiles = $extractZipResult['extracted'];
+        $slice = array_slice($extractedFiles, 0, 50);
+        foreach ($slice as $file) {
+            $content .= '<li>'.htmlspecialchars($file).'</li>';
         }
         if ($extractedCount > 50) {
-            $content .= '<li><em>'.__('and_more', ['count' => ($extractedCount - 50)]).'</em></li>';
+            $content .= '<li><em>'.resolveLangKey('and_more', $langForGlobal, ['count' => ($extractedCount - 50)]).'</em></li>';
         }
         $content .= '</ul>';
-        echo renderPage(__('installation_successful'), $content, null, $envPath, !empty($config['password'] ?? ''));
+        echo renderPage(resolveLangKey('installation_successful', $langForGlobal), $content, null, $envPath, !empty($config['password'] ?? ''));
         exit;
     }
 
@@ -1401,52 +1824,62 @@ try {
 
     $branchHtml = '';
     foreach ($branches as $branch) {
-        $name = htmlspecialchars((string) $branch['name']);
-        $sha = substr((string) $branch['commit'], 0, 7);
-        $branchHtml .= '<li><span><span class="branch-name">'.$name.'</span><span class="commit-sha">'.$sha.'</span></span>';
-        $branchHtml .= '<form method="post" style="display:inline"><input type="hidden" name="ref" value="'.$name.'"><input type="hidden" name="ref_type" value="branch"><button type="submit" name="install" class="btn">'.__('install').'</button></form></li>';
+        $bName = (isset($branch['name'])) ? (string) $branch['name'] : '';
+        $bCommit = (isset($branch['commit'])) ? (string) $branch['commit'] : '';
+        $bCommitShort = substr($bCommit, 0, 7);
+        $branchHtml .= '<li><span><span class="branch-name">'.htmlspecialchars($bName).'</span>'
+            .'<span class="commit-sha">'.htmlspecialchars($bCommitShort).'</span></span>';
+        $branchHtml .= '<form method="post" style="display:inline"><input type="hidden" name="ref" value="'.htmlspecialchars($bName).'"><input type="hidden" name="ref_type" value="branch"><button type="submit" name="install" class="btn">'.resolveLangKey('install', $langForGlobal).'</button></form></li>';
     }
 
     $tagHtml = '';
     foreach ($tags as $tag) {
-        $name = htmlspecialchars((string) $tag['name']);
-        $sha = substr((string) $tag['commit'], 0, 7);
-        $tagHtml .= '<li><span><span class="tag-name">'.$name.'</span><span class="commit-sha">'.$sha.'</span></span>';
+        $tName = (isset($tag['name'])) ? (string) $tag['name'] : '';
+        $tCommit = (isset($tag['commit'])) ? (string) $tag['commit'] : '';
+        $tCommitShort = substr($tCommit, 0, 7);
+        $tagHtml .= '<li><span><span class="tag-name">'.htmlspecialchars($tName).'</span><span class="commit-sha">'.htmlspecialchars($tCommitShort).'</span></span>';
         $tagHtml .= '<span>';
-        $tagHtml .= '<form method="post" style="display:inline; margin-right:6px"><input type="hidden" name="ref" value="'.$name.'"><input type="hidden" name="ref_type" value="tag"><button type="submit" name="install" class="btn btn-secondary">'.__('install').'</button></form>';
-        $tagHtml .= '<form method="post" style="display:inline"><input type="hidden" name="ref" value="'.$name.'"><button type="submit" name="self_update" class="btn">'.__('update_updater').'</button></form>';
+        $tagHtml .= '<form method="post" style="display:inline; margin-right:6px"><input type="hidden" name="ref" value="'.htmlspecialchars($tName).'"><input type="hidden" name="ref_type" value="tag"><button type="submit" name="install" class="btn btn-secondary">'.resolveLangKey('install', $langForGlobal).'</button></form>';
+        $tagHtml .= '<form method="post" style="display:inline"><input type="hidden" name="ref" value="'.htmlspecialchars($tName).'"><button type="submit" name="self_update" class="btn">'.resolveLangKey('update_updater', $langForGlobal).'</button></form>';
         $tagHtml .= '</span></li>';
     }
 
     if (empty($branches)) {
-        $branchHtml = '<li><em>'.__('no_branches_found').'</em></li>';
+        $branchHtml = '<li><em>'.resolveLangKey('no_branches_found', $langForGlobal).'</em></li>';
     }
     if (empty($tags)) {
-        $tagHtml = '<li><em>'.__('no_tags_found').'</em></li>';
+        $tagHtml = '<li><em>'.resolveLangKey('no_tags_found', $langForGlobal).'</em></li>';
     }
 
-    $content = '<div class="repo-info"><strong>'.__('updater_version').':</strong> <code>'.htmlspecialchars($currentInstallerVersion).'</code><br><strong>'.__('project_version').':</strong> <code>'.htmlspecialchars($currentProjectVersion).'</code><br><strong>'.__('repository').':</strong> <code>'.htmlspecialchars((string) $repository).'</code><br><strong>'.__('target_directory').':</strong> <code>'.htmlspecialchars($targetDir).'</code>';
+    $envPath = rtrim($targetDirStr, '/').'/.env.local';
+    $content = '<div class="repo-info"><strong>'.resolveLangKey('updater_version', $langForGlobal).':</strong> <code>'.htmlspecialchars($currentInstallerVersion).'</code><br><strong>'.resolveLangKey('project_version', $langForGlobal).':</strong> <code>'.htmlspecialchars($currentProjectVersion).'</code><br><strong>'.resolveLangKey('repository', $langForGlobal).':</strong> <code>'.htmlspecialchars((string) $repository).'</code><br><strong>'.resolveLangKey('target_directory', $langForGlobal).':</strong> <code>'.htmlspecialchars($targetDirStr).'</code>';
     if (!empty($whitelistFolders) || !empty($whitelistFiles)) {
-        $content .= '<br><strong>'.__('whitelist_active').':</strong> ';
+        $content .= '<br><strong>'.resolveLangKey('whitelist_active', $langForGlobal).':</strong> ';
         $wlItems = array_merge($whitelistFolders, $whitelistFiles);
-        $content .= htmlspecialchars(implode(', ', array_slice($wlItems, 0, 5)));
+        /** @var array<string> $wlItemsString */
+        $wlItemsString = array_map(fn ($item) => (string) $item, $wlItems);
+        $content .= htmlspecialchars(implode(', ', array_slice($wlItemsString, 0, 5)));
         if (count($wlItems) > 5) {
             $content .= ' ...';
         }
     }
     $content .= '</div>';
 
-    $text_confirm_clear_cache = __('confirm_clear_cache');
-    $content .= '<form method="post" style="margin-bottom:20px"><button type="submit" name="clear_cache" class="btn btn-secondary" onclick="return confirm(\''.$text_confirm_clear_cache.'\')">'.__('clear_cache').'</button></form>';
-    $content .= '<div class="tabs"><button class="tab active" onclick="showTab(\'branches\')">'.__('branches').' ('.count($branches).')</button><button class="tab" onclick="showTab(\'tags\')">'.__('tags').' ('.count($tags).')</button></div>';
+    $text_confirm_clear_cache = resolveLangKey('confirm_clear_cache', $langForGlobal);
+    $content .= '<form method="post" style="margin-bottom:20px"><button type="submit" name="clear_cache" class="btn btn-secondary" onclick="return confirm(\''.htmlspecialchars($text_confirm_clear_cache).'\')">'.resolveLangKey('clear_cache', $langForGlobal).'</button></form>';
+    $content .= '<div class="tabs"><button class="tab active" onclick="showTab(\'branches\')">'.resolveLangKey('branches', $langForGlobal).' ('.count($branches).')</button><button class="tab" onclick="showTab(\'tags\')">'.resolveLangKey('tags', $langForGlobal).' ('.count($tags).')</button></div>';
     $content .= '<div id="branches" class="tab-content active"><ul class="branch-list">'.$branchHtml.'</ul></div>';
     $content .= '<div id="tags" class="tab-content"><ul class="tag-list">'.$tagHtml.'</ul></div>';
     $content .= '<script>function showTab(t){document.querySelectorAll(".tab-content").forEach(e=>e.classList.remove("active"));document.querySelectorAll(".tab").forEach(e=>e.classList.remove("active"));document.getElementById(t).classList.add("active");event.target.classList.add("active");}</script>';
 
-    $envPath = rtrim($targetDir, '/').'/.env.local';
-    $hasPassword = !empty($config['password'] ?? '');
-    echo renderPage(__('title'), $content, null, $envPath, $hasPassword);
+    $envPath = rtrim($targetDirStr, '/').'/.env.local';
+    $hasPassword = (isset($config['password']) && is_scalar($config['password']) && '' !== (string) $config['password']);
+    echo renderPage(resolveLangKey('title', $langForGlobal), $content, null, $envPath, $hasPassword);
 } catch (Exception $e) {
-    $hasPassword = !empty($config['password'] ?? '');
-    echo renderPage(__('error'), '<p>'.__('error_occurred').'</p>', $e->getMessage(), null, $hasPassword);
+    /** @var array<string, string> $langForCatch */
+    $langForCatch = (isset($lang) && is_array($lang)) ? $lang : [];
+    $targetDirStrCatch = (isset($targetDirStr) && is_string($targetDirStr)) ? $targetDirStr : '';
+    $envPathCatch = ('' !== $targetDirStrCatch) ? rtrim($targetDirStrCatch, '/').'/.env.local' : null;
+    $hasPasswordCatch = (isset($config['password']) && is_scalar($config['password']) && '' !== (string) $config['password']);
+    echo renderPage(resolveLangKey('error', $langForCatch), '<p>'.resolveLangKey('error_occurred', $langForCatch).'</p>', $e->getMessage(), $envPathCatch, $hasPasswordCatch);
 }
