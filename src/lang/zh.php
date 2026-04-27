@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 return [
     'title' => 'GitHub 仓库安装程序',
     'repository' => '仓库',

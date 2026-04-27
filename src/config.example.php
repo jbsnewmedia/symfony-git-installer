@@ -3,6 +3,14 @@
 declare(strict_types=1);
 
 return [
+    'updater_source_path' => 'public/update',
+
+    'show_versions_before_login' => false,
+
+    'installer_version' => '',
+
+    'project_version' => '',
+
     'repository' => 'jbsnewmedia/symfony-git-installer',
 
     'github_token' => $_ENV['GITHUB_TOKEN'] ?? '',
@@ -13,7 +21,7 @@ return [
 
     'target_directory' => '../../',
 
-    'temp_directory' => __DIR__ . '/temp',
+    'temp_directory' => __DIR__.'/temp',
 
     'exclude_folders' => [
         '.git',

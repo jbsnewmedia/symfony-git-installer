@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 return [
     'title' => 'GitHub 저장소 설치 프로그램',
     'repository' => '저장소',
