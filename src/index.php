@@ -200,7 +200,7 @@ function isAllowedUpdaterFile(string $relativePath): bool
 {
     $relativePath = normalizeRelativePath($relativePath);
 
-    if ('index.php' === $relativePath || '.htaccess' === $relativePath) {
+    if ('index.php' === $relativePath || '.htaccess' === $relativePath || 'config.example.php' === $relativePath) {
         return true;
     }
 
@@ -241,7 +241,11 @@ function updateUpdaterFromTag(
         }
 
         $archiveRoot = (string) $dirs[0];
-        $sourceDir = $archiveRoot.'/'.normalizeRelativePath($updaterSourcePath);
+        $sourceDir = $archiveRoot;
+        if ('' !== $updaterSourcePath) {
+            $sourceDir .= '/'.normalizeRelativePath($updaterSourcePath);
+        }
+
         if (!is_dir($sourceDir)) {
             throw new RuntimeException('Updater source path not found in archive: '.$updaterSourcePath);
         }
@@ -1768,11 +1772,19 @@ try {
             // however the user explicitly said "downgrade usw".
         }
 
-        $updaterSourcePath = 'public/update';
-        if (isset($config['updater_source_path']) && is_scalar($config['updater_source_path'])) {
+        $updaterSourcePath = 'src';
+        if (isset($_GET['manage']) && 'installer' === $_GET['manage']) {
+            $updaterSourcePath = 'src';
+        } elseif (isset($config['updater_source_path']) && is_scalar($config['updater_source_path'])) {
             $updaterSourcePath = (string) $config['updater_source_path'];
         }
-        $selfUpdateResult = updateUpdaterFromTag($client, $repository, $tag, $updaterSourcePath, __DIR__);
+
+        $repoToUpdateFrom = $repository;
+        if (isset($_GET['manage']) && 'installer' === $_GET['manage']) {
+            $repoToUpdateFrom = $installerRepo;
+        }
+
+        $selfUpdateResult = updateUpdaterFromTag($client, $repoToUpdateFrom, $tag, $updaterSourcePath, __DIR__);
         $updatedCount = (int) count($selfUpdateResult['updated_files']);
 
         writeConfigValues($configPath, [

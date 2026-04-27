@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 return [
-    'updater_source_path' => 'public/update',
+    'updater_source_path' => 'src',
 
     'show_versions_before_login' => false,
 
