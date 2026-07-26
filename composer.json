@@ -10,7 +10,7 @@
         }
     ],
     "require": {
-        "php": ">=8.2",
+        "php": "~8.3.0 || ~8.4.0 || ~8.5.0",
         "ext-curl": "*",
         "ext-zip": "*",
         "ext-openssl": "*"
@@ -54,8 +54,9 @@
         "bin-phpunit-install": ["composer bin phpunit install"],
         "bin-phpunit-update": ["composer bin phpunit update"],
         "bin-phpunit": ["vendor-bin/phpunit/vendor/bin/phpunit"],
-        "bin-phpunit-no-coverage": ["vendor-bin/phpunit/vendor/bin/phpunit --configuration=phpunit-no-coverage.xml.dist"],
-        "bin-phpunit-coverage": ["XDEBUG_MODE=coverage vendor-bin/phpunit/vendor/bin/phpunit --configuration=phpunit-coverage.xml.dist --coverage-html var/coverage"],
+        "bin-phpunit-no-coverage": ["@bin-phpunit --configuration=phpunit-no-coverage.xml.dist"],
+        "bin-phpunit-coverage": ["XDEBUG_MODE=coverage @bin-phpunit --configuration=phpunit-coverage.xml.dist --coverage-html var/coverage"],
+        "bin-phpunit-strict": ["@bin-phpunit --configuration=phpunit-no-coverage.xml.dist --display-deprecations --fail-on-deprecation"],
         "bin-phpunit-v": ["vendor-bin/phpunit/vendor/bin/phpunit --version"],
 
         "bin-rector-install": ["composer bin rector install"],
@@ -64,13 +65,13 @@
         "bin-rector-process": ["vendor-bin/rector/vendor/bin/rector process"],
         "bin-rector-v": ["vendor-bin/rector/vendor/bin/rector -V"],
 
-        "test": ["@bin-phpunit-no-coverage"],
+        "test": ["@bin-phpunit-strict"],
         "test-coverage": ["@bin-phpunit-coverage"],
         "test-full": ["@bin-phpunit"],
         "test-watch": ["@bin-phpunit --testdox"],
 
-        "ci": ["@bin-ecs", "@bin-rector", "@bin-phpstan", "@bin-phpunit-no-coverage"],
-        "ci-fix": ["@bin-ecs-fix", "@bin-rector-process", "@bin-phpstan", "@bin-phpunit-no-coverage"],
+        "ci": ["@bin-ecs", "@bin-rector", "@bin-phpstan", "@bin-phpunit-strict"],
+        "ci-fix": ["@bin-ecs-fix", "@bin-rector-process", "@bin-phpstan", "@bin-phpunit-strict"],
         "ci-coverage": ["@bin-ecs", "@bin-rector", "@bin-phpstan", "@bin-phpunit-coverage"]
     }
 }

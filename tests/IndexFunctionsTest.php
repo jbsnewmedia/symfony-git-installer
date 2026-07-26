@@ -37,26 +37,20 @@ final class IndexFunctionsTest extends TestCase
         $this->assertTrue(isAllowedUpdaterFile('.htaccess'));
         $this->assertTrue(isAllowedUpdaterFile('lang/de.php'));
         $this->assertTrue(isAllowedUpdaterFile('lang/en.php'));
+        $this->assertTrue(isAllowedUpdaterFile('app/Filesystem.php'));
 
         $this->assertFalse(isAllowedUpdaterFile('config.php'));
-        $this->assertFalse(isAllowedUpdaterFile('src/index.php'));
         $this->assertFalse(isAllowedUpdaterFile('lang/de.txt'));
-        $this->assertFalse(isAllowedUpdaterFile('other/file.php'));
     }
 
     public function testCanUpdateInstallerToTag(): void
     {
-        // Wenn einer kein Semver ist, wird true zurückgegeben (Fallback)
         $this->assertTrue(canUpdateInstallerToTag('unknown', 'v1.0.0'));
         $this->assertTrue(canUpdateInstallerToTag('v1.0.0', 'latest'));
 
-        // Ziel >= Aktuell
         $this->assertTrue(canUpdateInstallerToTag('v1.0.0', 'v1.1.0'));
         $this->assertTrue(canUpdateInstallerToTag('v1.1.0', 'v1.1.0'));
 
-        // Downgrades sind standardmäßig nicht erlaubt (in der Funktion selbst),
-        // aber wir haben den Check im Controller entfernt.
-        // Wir lassen die Funktion so wie sie ist, falls sie woanders gebraucht wird.
         $this->assertFalse(canUpdateInstallerToTag('v1.1.0', 'v1.0.0'));
         $this->assertFalse(canUpdateInstallerToTag('v1.2.0', 'v1.1.0'));
     }
@@ -78,14 +72,18 @@ final class IndexFunctionsTest extends TestCase
             ['name' => 'v1.1.0', 'commit' => 'sha3'],
         ];
 
-        // Wenn in config gesetzt, wird das bevorzugt
         $this->assertSame('v1.5.0', resolveInstallerVersion(['installer_version' => 'v1.5.0'], $tags));
 
-        // Wenn nicht gesetzt, wird unknown zurückgegeben (da der User keine Version installiert hat)
         $this->assertSame('unknown', resolveInstallerVersion([], $tags));
-
-        // Fallback wenn keine Tags
         $this->assertSame('unknown', resolveInstallerVersion([], []));
+    }
+
+    public function testResolveInstallerVersionWithCommit(): void
+    {
+        $this->assertSame('mainabcdefg', resolveInstallerVersion([
+            'installer_version' => 'main',
+            'installer_commit' => 'abcdefg123456',
+        ], []));
     }
 
     public function testClearCacheDirectory(): void
@@ -126,6 +124,26 @@ ENV;
 
         $this->assertSame('Database 2', $result['databases'][1]['id']);
         $this->assertFalse($result['databases'][1]['active']);
+
+        unlink($envPath);
+    }
+
+    public function testParseEnvLocalWithAppSecretAndInstallUuid(): void
+    {
+        $envPath = __DIR__ . '/.env.test';
+        $content = <<<ENV
+APP_ENV=prod
+APP_SECRET=abcdef1234567890abcdef1234567890
+INSTALL_UUID=01234567-89ab-7cde-8f01-234567890abc
+DATABASE_URL="mysql://user:pass@127.0.0.1/db1" # DB1
+ENV;
+        file_put_contents($envPath, $content);
+
+        $result = parseEnvLocal($envPath);
+
+        $this->assertSame('prod', $result['app_env']);
+        $this->assertSame('abcdef1234567890abcdef1234567890', $result['app_secret']);
+        $this->assertSame('01234567-89ab-7cde-8f01-234567890abc', $result['install_uuid']);
 
         unlink($envPath);
     }

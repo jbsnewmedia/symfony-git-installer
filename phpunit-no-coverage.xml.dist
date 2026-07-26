@@ -8,10 +8,16 @@
          displayDetailsOnTestsThatTriggerErrors="true"
          displayDetailsOnTestsThatTriggerNotices="true"
          displayDetailsOnTestsThatTriggerWarnings="true"
+         failOnDeprecation="true"
+         failOnNotice="true"
+         failOnWarning="true"
 >
     <testsuites>
         <testsuite name="Project Test Suite">
             <directory>tests</directory>
         </testsuite>
     </testsuites>
+    <php>
+        <ini name="error_reporting" value="-1"/>
+    </php>
 </phpunit>
