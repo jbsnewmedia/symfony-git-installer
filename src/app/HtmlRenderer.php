@@ -630,18 +630,26 @@ HTML;
         $iconNavUuid = lucideIcon('fingerprint', 16);
         $iconNavSystem = lucideIcon('info', 16);
         $iconNavInstaller = lucideIcon('wrench', 16);
+        // Aktiven Navigationspunkt markieren (CSS: .dashboard-btn.active)
+        $navClassHome = ('' === $activeView || 'home' === $activeView) ? ' active' : '';
+        $navClassUpdates = ('updates' === $activeView) ? ' active' : '';
+        $navClassEnvironment = ('environment' === $activeView) ? ' active' : '';
+        $navClassDatabases = ('databases' === $activeView) ? ' active' : '';
+        $navClassInstallUuid = ('install-uuid' === $activeView) ? ' active' : '';
+        $navClassSystem = ('system' === $activeView) ? ' active' : '';
+        $navClassInstaller = ('installer' === $activeView) ? ' active' : '';
         $text_dashboard_home = resolveLangKey('dashboard_home', $langForTemplate);
         $text_dashboard_system = resolveLangKey('dashboard_system', $langForTemplate);
         $text_dashboard_installer = resolveLangKey('dashboard_installer', $langForTemplate);
         $dashboardNavHtml = <<<HTML
 <div class="dashboard-nav">
-    <a class="dashboard-btn btn btn-secondary btn-small" id="btn-home" href="?">{$iconNavHome} {$text_dashboard_home}</a>
-    <a class="dashboard-btn btn btn-secondary btn-small" id="btn-updates" href="?view=updates">{$iconNavUpdates} {$text_dashboard_updates}</a>
-    <a class="dashboard-btn btn btn-secondary btn-small" id="btn-environment" href="?view=environment">{$iconNavEnv} {$text_dashboard_environment}</a>
-    <a class="dashboard-btn btn btn-secondary btn-small" id="btn-databases" href="?view=databases">{$iconNavDb} {$text_dashboard_databases}</a>
-    <a class="dashboard-btn btn btn-secondary btn-small" id="btn-install-uuid" href="?view=install-uuid">{$iconNavUuid} {$text_dashboard_install_uuid}</a>
-    <a class="dashboard-btn btn btn-secondary btn-small" id="btn-system" href="?view=system">{$iconNavSystem} {$text_dashboard_system}</a>
-    <a class="dashboard-btn btn btn-secondary btn-small" id="btn-installer" href="?view=installer">{$iconNavInstaller} {$text_dashboard_installer}</a>
+    <a class="dashboard-btn btn btn-secondary btn-small{$navClassHome}" id="btn-home" href="?">{$iconNavHome} {$text_dashboard_home}</a>
+    <a class="dashboard-btn btn btn-secondary btn-small{$navClassUpdates}" id="btn-updates" href="?view=updates">{$iconNavUpdates} {$text_dashboard_updates}</a>
+    <a class="dashboard-btn btn btn-secondary btn-small{$navClassEnvironment}" id="btn-environment" href="?view=environment">{$iconNavEnv} {$text_dashboard_environment}</a>
+    <a class="dashboard-btn btn btn-secondary btn-small{$navClassDatabases}" id="btn-databases" href="?view=databases">{$iconNavDb} {$text_dashboard_databases}</a>
+    <a class="dashboard-btn btn btn-secondary btn-small{$navClassInstallUuid}" id="btn-install-uuid" href="?view=install-uuid">{$iconNavUuid} {$text_dashboard_install_uuid}</a>
+    <a class="dashboard-btn btn btn-secondary btn-small{$navClassSystem}" id="btn-system" href="?view=system">{$iconNavSystem} {$text_dashboard_system}</a>
+    <a class="dashboard-btn btn btn-secondary btn-small{$navClassInstaller}" id="btn-installer" href="?view=installer">{$iconNavInstaller} {$text_dashboard_installer}</a>
 </div>
 HTML;
 

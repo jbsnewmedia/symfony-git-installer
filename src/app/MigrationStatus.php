@@ -29,10 +29,17 @@ function getMigrationsStatus(string $targetDir): array
         ];
     }
 
-    $cmd = 'php '.escapeshellarg($console).' doctrine:migrations:status --no-interaction 2>&1';
-    $output = (string) shell_exec($cmd);
+    // exec statt shell_exec: Exitcode entscheiden lassen, ob der Befehl
+    // ueberhaupt lief (Muster: doc/installer-fehlerbericht-upstream.md -
+    // Ausgabe ist kein Erfolgskriterium).
+    $lines = [];
+    $exitCode = 0;
+    exec('php '.escapeshellarg($console).' doctrine:migrations:status --no-interaction 2>&1', $lines, $exitCode);
+    $output = implode("\n", $lines);
 
-    if (preg_match('/New Migrations:\s+(\d+)/i', $output, $matches)) {
+    // Doctrine-Formate: legacy "New Migrations: 3" und Tabelle "| New | 3 |"
+    if (preg_match('/New Migrations:\s*(\d+)/i', $output, $matches)
+        || preg_match('/\|\s*New(?:\s+Migrations)?\s*\|\s*(\d+)\s*\|/i', $output, $matches)) {
         $count = (int) $matches[1];
         if ($count > 0) {
             return [
@@ -77,25 +84,40 @@ function getMigrationsStatus(string $targetDir): array
         }
     }
 
+    // Befehl lief sauber, aber die Ausgabe entspricht keinem bekannten
+    // Format: kein Fehler melden (rotes "Error: +-----+" war der alte
+    // Fehlalarm), sondern neutral als synchron anzeigen.
+    if (0 === $exitCode) {
+        return [
+            'html' => '<span style="color:#28a745; font-weight:bold;">'.resolveLangKey('no_migrations_to_execute', $langForMigrations).'</span>',
+            'count' => 0,
+            'error' => false,
+        ];
+    }
+
     $lines = explode("\n", $trimmedOutput);
     foreach ($lines as $line) {
         $line = trim($line);
-        if ('' !== $line && !str_contains($line, 'CRITICAL') && !str_contains($line, 'DEBUG')) {
-            if (str_contains($line, 'ExceptionConverter.php') || str_contains($line, 'Connection refused') || str_contains($line, 'could not find driver')) {
-                return [
-                    'html' => '<span style="color:#6a737d;">'.resolveLangKey('migrations_disabled_no_db', $langForMigrations).'</span>',
-                    'count' => 0,
-                    'error' => false,
-                    'no_db' => true,
-                ];
-            }
-
+        if ('' === $line || 1 === preg_match('/^[+|\-_=~ ]+$/', $line)) {
+            continue;
+        }
+        if (str_contains($line, 'CRITICAL') || str_contains($line, 'DEBUG')) {
+            continue;
+        }
+        if (str_contains($line, 'ExceptionConverter.php') || str_contains($line, 'Connection refused') || str_contains($line, 'could not find driver')) {
             return [
-                'html' => '<span style="color:#d73a49; font-size:0.9em;">Error: '.htmlspecialchars($line).'</span>',
+                'html' => '<span style="color:#6a737d;">'.resolveLangKey('migrations_disabled_no_db', $langForMigrations).'</span>',
                 'count' => 0,
-                'error' => true,
+                'error' => false,
+                'no_db' => true,
             ];
         }
+
+        return [
+            'html' => '<span style="color:#d73a49; font-size:0.9em;">Error: '.htmlspecialchars($line).'</span>',
+            'count' => 0,
+            'error' => true,
+        ];
     }
 
     $errorMsgFallback = (string) strtok($trimmedOutput, "\n");
