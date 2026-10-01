@@ -195,9 +195,9 @@ final class InstallerApplication
             if (isset($config['log_directory']) && is_scalar($config['log_directory'])) {
                 $configuredLogDir = trim((string) $config['log_directory']);
             }
-            $logContext = installerLogBaseDirectory($projectRoot, $configuredLogDir);
+            $logContext = installerLogBaseDirectory($targetDirStr.'/var', $configuredLogDir);
 
-            $githubCacheDir = $projectRoot.'/var/cache/github-api';
+            $githubCacheDir = $targetDirStr.'/var/cache/github-api';
             $versionProbeClient = new GitHubClient($apiBaseUrl, $token);
             $tags = getCachedGitHubRepositoryRefs($versionProbeClient, $repository, $githubCacheDir)['tags'];
 
