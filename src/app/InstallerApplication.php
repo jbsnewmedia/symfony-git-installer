@@ -395,8 +395,11 @@ final class InstallerApplication
             if ('POST' === $_SERVER['REQUEST_METHOD'] && isset($_POST['run_migrations'])) {
                 $console = rtrim($targetDirFinal, '/').'/bin/console';
                 $cmd = 'php '.escapeshellarg($console).' doctrine:migrations:migrate --no-interaction 2>&1';
-                $output = shell_exec($cmd);
-                $exitOk = null === $output || '' === $output;
+                $migrateLines = [];
+                $migrateExit = 0;
+                exec($cmd, $migrateLines, $migrateExit);
+                $output = implode("\n", $migrateLines);
+                $exitOk = 0 === $migrateExit;
 
                 if ($exitOk) {
                     $content = '<div class="success">'.resolveLangKey('migrations_run_successfully', $langForGlobal).'</div>';
